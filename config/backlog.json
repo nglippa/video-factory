@@ -1,0 +1,54 @@
+[
+  {
+    "id": "whodunnit-clear-writing",
+    "projectId": "whodunnit",
+    "topic": "Clearer writing, same meaning",
+    "targetAudience": "People who want clearer writing without losing their voice",
+    "intendedMessage": "Less clutter. The same idea.",
+    "proposedHook": "Make room for your voice.",
+    "requiredAssets": [],
+    "sourceReferences": [
+      {
+        "id": "whodunnit-approved-clear-writing",
+        "url": null,
+        "source": "Synthetic pair explicitly approved by the user on 2026-10-10. Branding and product identity from Whodunnit README and design tokens.",
+        "verified": true,
+        "type": "synthetic"
+      }
+    ],
+    "template": "before-after",
+    "contentId": "clear-writing",
+    "approvalRequirements": {"content": true, "publishing": true},
+    "status": "APPROVED",
+    "taxYear": null,
+    "taxClaims": false,
+    "syntheticDemo": true,
+    "provenance": {"kind": "seed", "approvedContentId": "clear-writing"}
+  },
+  {
+    "id": "gigwise-recordkeeping",
+    "projectId": "gigwise",
+    "topic": "Organize your business records",
+    "targetAudience": "Independent workers organizing business records",
+    "intendedMessage": "Track mileage, receipts, and business expenses.",
+    "proposedHook": "A little structure goes a long way.",
+    "requiredAssets": [],
+    "sourceReferences": [
+      {
+        "id": "gigwise-approved-recordkeeping",
+        "url": null,
+        "source": "Curated from GigWise app/layout.tsx product metadata. No rates, eligibility rules, or savings claims. Original illustrative bookkeeping copy. Original general organizational guidance: retain a date, a business purpose, and the matching receipt. This does not state tax eligibility requirements.",
+        "verified": true,
+        "type": "project"
+      }
+    ],
+    "template": "explainer",
+    "contentId": "recordkeeping",
+    "approvalRequirements": {"content": true, "publishing": true},
+    "status": "APPROVED",
+    "taxYear": null,
+    "taxClaims": false,
+    "syntheticDemo": false,
+    "provenance": {"kind": "seed", "approvedContentId": "recordkeeping"}
+  }
+]

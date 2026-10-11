@@ -1,3 +1,5 @@
+Phase 1 historical verification is preserved below. For the independently rechecked baseline and Phase 2 production/service evidence, see [PHASE2-VERIFICATION.md](PHASE2-VERIFICATION.md).
+
 # Verified local production
 
 Verified October 10, 2026 (America/Chicago) on the target M4 Pro Mac mini with 24 GB unified memory. Artifact timestamps use UTC, October 11.

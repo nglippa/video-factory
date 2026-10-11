@@ -9,6 +9,9 @@ import {templateSchema,type Template} from './domain.js';
 import {checkOllama,discoverBonsai} from './models.js';
 import {Pipeline} from './pipeline.js';
 import {JobStore,type JobRow} from './store.js';
+import {BacklogService} from './backlog.js';
+import {dueSchedules,productionGate,runDueSchedules,scheduleSchema} from './scheduler.js';
+export {dueSchedules,scheduleSchema} from './scheduler.js';
 const api='http://'+HOST+':'+PORT;
 class ApiResponseError extends Error{constructor(readonly status:number,message:string){super(message);}}
 function args(argv:string[]){const result:Record<string,string|boolean>={};for(let i=0;i<argv.length;i++){const value=argv[i]!;if(value.startsWith('--')){const next=argv[i+1];if(next&&!next.startsWith('--')){result[value.slice(2)]=next;i++;}else result[value.slice(2)]=true;}}return result;}
@@ -18,19 +21,22 @@ function unavailable(error:unknown){return error instanceof TypeError||error ins
 async function validatedInput(options:Record<string,string|boolean>){const projectId=required(options.project,'project'),topic=required(options.topic,'topic'),contentId=required(options.content,'content');if(topic.length>300)throw new Error('Topic exceeds 300 characters');const profile=await loadProfile(projectId);if(!profile.approvedContent.some((c)=>c.id===contentId))throw new Error('Content is not approved');const template=templateSchema.parse(typeof options.template==='string'?options.template:profile.templates[0]);if(!profile.templates.includes(template))throw new Error('Template is not enabled');return {projectId,topic,contentId,template};}
 type JobInput={projectId:string;topic:string;contentId:string;template:Template;idempotencyKey?:string};
 async function enqueue(input:JobInput):Promise<JobRow>{try{return await apiRequest('POST','/api/jobs',input);}catch(e){if(!unavailable(e))throw e;const store=new JobStore(DB_PATH);try{return store.create(input);}finally{store.close();}}}
-export const scheduleSchema=z.array(z.object({id:z.string().regex(/^[a-z0-9-]+$/),projectId:z.string(),topic:z.string().min(1).max(300),contentId:z.string(),template:templateSchema,hour:z.number().int().min(0).max(23),minute:z.number().int().min(0).max(59),timezone:z.string().refine((v)=>{try{new Intl.DateTimeFormat('en',{timeZone:v});return true;}catch{return false;}},'Invalid timezone'),enabled:z.boolean()}).strict()).refine((s)=>new Set(s.map((v)=>v.id)).size===s.length,'Schedule IDs must be unique');
-export function dueSchedules(value:unknown,now=new Date()){
-  return scheduleSchema.parse(value).filter((s)=>s.enabled).flatMap((s)=>{const parts=new Intl.DateTimeFormat('en-CA',{timeZone:s.timezone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(now);const get=(t:string)=>parts.find((p)=>p.type===t)?.value??'';if(Number(get('hour'))*60+Number(get('minute'))<s.hour*60+s.minute)return [];return [{...s,idempotencyKey:'schedule:'+s.id+':'+get('year')+'-'+get('month')+'-'+get('day')}];});
-}
 export async function main(argv=process.argv.slice(2)){
   const command=argv[0],options=args(argv.slice(1));
   if(command==='doctor'){
     const versions:Record<string,unknown>={node:process.version,profiles:(await loadProfiles()).map((p)=>({id:p.id,enabled:p.enabled})),tools:{}};
     for(const tool of ['ffmpeg','ffprobe','ollama']){const result=spawnSync(tool,tool==='ollama'?['--version']:['-version'],{encoding:'utf8'});(versions.tools as Record<string,unknown>)[tool]={available:result.status===0,version:result.stdout?.split('\n')[0]??null};}
-    try{const q=await checkOllama();versions.ollama={available:true,models:q.modelDetails,loaded:q.loaded};}catch(e){versions.ollama={available:false,error:e instanceof Error?e.message:String(e)};}
+    try{const q=await checkOllama();versions.ollama={available:true,models:q.modelDetails,selected:q.selected,loaded:q.loaded};}catch(e){versions.ollama={available:false,error:e instanceof Error?e.message:String(e)};}
     const bonsai=await discoverBonsai();versions.bonsai={available:Boolean(bonsai.base),endpoint:bonsai.base?.href??null,reason:bonsai.reason};console.log(JSON.stringify(versions,null,2));return;
   }
   if(command==='jobs'){try{console.log(JSON.stringify(await apiRequest('GET','/api/jobs'),null,2));}catch(e){if(!unavailable(e))throw e;const store=new JobStore(DB_PATH);try{console.log(JSON.stringify(store.list(),null,2));}finally{store.close();}}return;}
+  if(command==='production'){
+    const action=argv[1]??'status',route=action==='status'?'/api/production':'/api/production/'+action;if(!['status','pause','resume'].includes(action))throw new Error('Usage: production status|pause|resume');
+    try{console.log(JSON.stringify(await apiRequest(action==='status'?'GET':'POST',route,action==='status'?undefined:{}),null,2));}catch(e){if(!unavailable(e))throw e;const store=new JobStore(DB_PATH);try{let result:unknown;if(action==='pause')result=store.setPaused(true);else if(action==='resume')result=store.setPaused(false,'Resumed by operator');else{const gate=await productionGate(store);result={...store.production(),window:gate.config.window,timezone:gate.config.timezone,minimumFreeDiskBytes:gate.config.minimumFreeDiskBytes,minimumFreeMemoryBytes:gate.config.minimumFreeMemoryBytes,jobConcurrency:gate.config.jobConcurrency,canStartJob:gate.allowed,gateReason:gate.reason};}console.log(JSON.stringify(result,null,2));}finally{store.close();}}return;
+  }
+  if(command==='backlog'){
+    const action=argv[1]??'list';if(action==='import'){const value=JSON.parse(await readFile(path.resolve(required(options.file,'file')),'utf8'));const values=Array.isArray(value)?value:[value];const store=new JobStore(DB_PATH),backlog=new BacklogService(store);try{console.log(JSON.stringify(values.map(idea=>backlog.upsertDraft(idea)),null,2));}finally{store.close();}return;}try{if(action==='list')console.log(JSON.stringify(await apiRequest('GET','/api/backlog'),null,2));else{const id=required(options.id,'id');if(!['approve','reject','produce'].includes(action))throw new Error('Usage: backlog list|approve|reject|produce [--id ID]');console.log(JSON.stringify(await apiRequest('POST','/api/backlog/'+encodeURIComponent(id)+'/'+action,{}),null,2));}}catch(e){if(!unavailable(e))throw e;const store=new JobStore(DB_PATH),backlog=new BacklogService(store);try{await backlog.seed();const id=typeof options.id==='string'?options.id:'';const result=action==='list'?backlog.list():action==='approve'?await backlog.approve(required(id,'id')):action==='reject'?backlog.reject(required(id,'id')):action==='produce'?await backlog.produce(required(id,'id')):undefined;if(result===undefined)throw new Error(action==='list'?'Invalid backlog action':'Backlog idea not found');console.log(JSON.stringify(result,null,2));}finally{store.close();}}return;
+  }
   if(command==='enqueue'){console.log(JSON.stringify(await enqueue({...await validatedInput(options),idempotencyKey:typeof options.key==='string'?options.key:undefined}),null,2));return;}
   if(command==='generate'){
     const input=await validatedInput(options);const key=typeof options.key==='string'?options.key:'manual:'+randomUUID();
@@ -52,11 +58,12 @@ export async function main(argv=process.argv.slice(2)){
     const id=z.uuid().parse(required(options.id,'id'));
     try{console.log(JSON.stringify(await apiRequest('POST','/api/jobs/'+id+'/'+command,{}),null,2));}catch(e){if(!unavailable(e))throw e;const store=new JobStore(DB_PATH);try{const job=command==='retry'?store.retry(id):command==='cancel'?store.requestCancel(id):store.review(id,command==='approve'?'APPROVED':'REJECTED');if(!job)throw new Error('Job not found');console.log(JSON.stringify(job,null,2));}finally{store.close();}}return;
   }
-  if(command==='schedule'){
-    const filename=path.resolve(required(options.file,'file'));const due=dueSchedules(JSON.parse(await readFile(filename,'utf8')));const created:JobRow[]=[];
-    for(const s of due){const input=await validatedInput({project:s.projectId,topic:s.topic,content:s.contentId,template:s.template});created.push(await enqueue({...input,idempotencyKey:s.idempotencyKey}));}
-    console.log(JSON.stringify(created,null,2));return;
+  if(command==='regenerate'){
+    const id=z.uuid().parse(required(options.id,'id'));try{console.log(JSON.stringify(await apiRequest('POST','/api/jobs/'+id+'/regenerate',{}),null,2));}catch(e){if(!unavailable(e))throw e;const store=new JobStore(DB_PATH);try{const prior=store.get(id);if(!prior)throw new Error('Job not found');const input=await validatedInput({project:prior.projectId,topic:prior.topic,content:prior.contentId,template:prior.template});const job=store.regenerate(id,input);console.log(JSON.stringify(job,null,2));}finally{store.close();}}return;
   }
-  throw new Error('Usage: npm run cli -- doctor | generate --project ID --topic TOPIC --content ID [--template T] | enqueue ... [--key K] | jobs | retry|cancel|approve|reject --id UUID | schedule --file config/schedules.json');
+  if(command==='schedule'){
+    const filename=path.resolve(required(options.file,'file')),value=JSON.parse(await readFile(filename,'utf8'));scheduleSchema.parse(value);const store=new JobStore(DB_PATH);try{await new BacklogService(store).seed();const gate=await productionGate(store);if(!gate.allowed)throw new Error('Schedule blocked: '+gate.reason);console.log(JSON.stringify(await runDueSchedules(store,value),null,2));store.recordProductionTick('Schedule CLI completed',null);}catch(error){store.recordProductionTick('Schedule CLI error',error instanceof Error?error.message:String(error));throw error;}finally{store.close();}return;
+  }
+  throw new Error('Usage: npm run cli -- doctor | generate --project ID --topic TOPIC --content ID [--template T] | enqueue ... [--key K] | jobs | retry|cancel|approve|reject|regenerate --id UUID | production status|pause|resume | backlog list|approve|reject|produce [--id ID] | schedule --file config/schedules.json');
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch((e)=>{console.error(e instanceof Error?e.message:String(e));process.exitCode=1;});

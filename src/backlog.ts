@@ -1,0 +1,50 @@
+import {readFile} from 'node:fs/promises';
+import path from 'node:path';
+import {z} from 'zod';
+import {CONFIG_DIR,loadProfile} from './config.js';
+import {templateSchema} from './domain.js';
+import {approvedAssets} from './assets.js';
+import {JobStore,type JobRow} from './store.js';
+
+export const backlogStatusSchema=z.enum(['DRAFT','APPROVED','QUEUED','READY_FOR_APPROVAL','PRODUCED','REJECTED','FAILED']);
+export const sourceReferenceSchema=z.object({id:z.string().min(1),url:z.url().nullable(),source:z.string().min(1),verified:z.boolean(),type:z.enum(['authoritative','project','synthetic'])}).strict();
+export const backlogIdeaSchema=z.object({
+  id:z.string().regex(/^[a-z0-9][a-z0-9-]*$/),projectId:z.string().min(1),topic:z.string().trim().min(1).max(300),targetAudience:z.string().trim().min(1),intendedMessage:z.string().trim().min(1),proposedHook:z.string().trim().min(1),requiredAssets:z.array(z.string().min(1)),sourceReferences:z.array(sourceReferenceSchema),template:templateSchema,contentId:z.string().min(1),approvalRequirements:z.object({content:z.literal(true),publishing:z.literal(true)}).strict(),status:backlogStatusSchema,taxYear:z.number().int().min(1900).max(2200).nullable(),taxClaims:z.boolean(),syntheticDemo:z.boolean(),provenance:z.record(z.string(),z.unknown()).optional()
+}).strict();
+export type BacklogIdea=z.infer<typeof backlogIdeaSchema> & {jobId:string|null;createdAt:string;updatedAt:string};
+
+export class BacklogService{
+  constructor(readonly store:JobStore){this.store.db.exec("CREATE TABLE IF NOT EXISTS backlog_ideas(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,status TEXT NOT NULL,data TEXT NOT NULL,job_id TEXT UNIQUE REFERENCES jobs(id),created_at TEXT NOT NULL,updated_at TEXT NOT NULL);CREATE INDEX IF NOT EXISTS backlog_eligible_idx ON backlog_ideas(project_id,status,created_at);");}
+  private map(row:Record<string,unknown>):BacklogIdea{const data=backlogIdeaSchema.parse(JSON.parse(row.data as string));return {...data,status:row.status as BacklogIdea['status'],jobId:row.job_id as string|null,createdAt:row.created_at as string,updatedAt:row.updated_at as string};}
+  get(id:string){const row=this.store.db.prepare('SELECT * FROM backlog_ideas WHERE id=?').get(id) as Record<string,unknown>|undefined;return row?this.map(row):undefined;}
+  list(projectId?:string){const rows=(projectId?this.store.db.prepare('SELECT * FROM backlog_ideas WHERE project_id=? ORDER BY created_at,id').all(projectId):this.store.db.prepare('SELECT * FROM backlog_ideas ORDER BY created_at,id').all()) as Record<string,unknown>[];return rows.map((row)=>this.map(row));}
+  private write(idea:z.infer<typeof backlogIdeaSchema>,onlyIfMissing=false){const now=new Date().toISOString(),json=JSON.stringify(idea);if(onlyIfMissing)this.store.db.prepare('INSERT OR IGNORE INTO backlog_ideas(id,project_id,status,data,created_at,updated_at)VALUES(?,?,?,?,?,?)').run(idea.id,idea.projectId,idea.status,json,now,now);else this.store.db.prepare('INSERT INTO backlog_ideas(id,project_id,status,data,created_at,updated_at)VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id,status=excluded.status,data=excluded.data,updated_at=excluded.updated_at').run(idea.id,idea.projectId,idea.status,json,now,now);return this.get(idea.id)!;}
+  async seed(filename=path.join(CONFIG_DIR,'backlog.json')){const ideas=z.array(backlogIdeaSchema).parse(JSON.parse(await readFile(filename,'utf8')));for(const idea of ideas){if(idea.status==='APPROVED')await this.validateForProduction(idea);this.write(idea,true);}return this.list();}
+  upsertDraft(value:unknown){const input=backlogIdeaSchema.omit({status:true}).parse(value);return this.store.transaction(()=>{if(this.get(input.id)?.jobId)throw new Error('A backlog idea bound to a job cannot be edited');return this.write({...input,status:'DRAFT'});});}
+  async validateForProduction(value:BacklogIdea|z.infer<typeof backlogIdeaSchema>){
+    const {jobId:_jobId,createdAt:_createdAt,updatedAt:_updatedAt,...candidate}=value as BacklogIdea,idea=backlogIdeaSchema.parse(candidate),profile=await loadProfile(idea.projectId),content=profile.approvedContent.find((entry)=>entry.id===idea.contentId);
+    if(!content)throw new Error('Blocked: contentId is not approved for this project');
+    if(!profile.templates.includes(idea.template))throw new Error('Blocked: template is not approved for this project');
+    if(idea.topic!==content.topic||idea.proposedHook!==content.hook||idea.intendedMessage!==content.body)throw new Error('Blocked: topic, hook, and message must exactly match approved product content');
+    if(idea.projectId==='whodunnit'&&!idea.syntheticDemo)throw new Error('Blocked: Whodunnit approved content is a synthetic demonstration and must be labeled');
+    const assets=await approvedAssets(profile.id);if(idea.requiredAssets.some((id)=>!assets.some(asset=>asset.id===id)))throw new Error('Blocked: required asset identifier is not approved for this project');
+    if(idea.taxClaims){
+      if(idea.taxYear===null)throw new Error('Blocked: tax claims require a tax year');
+      const verifiedIrs=idea.sourceReferences.some((reference)=>{if(!reference.verified||reference.type!=='authoritative'||!reference.url)return false;try{const host=new URL(reference.url).hostname.toLowerCase();return host==='irs.gov'||host.endsWith('.irs.gov');}catch{return false;}});
+      if(!verifiedIrs)throw new Error('Blocked: tax claims require a verified irs.gov source');
+      throw new Error('Blocked: tax-claim production requires an explicitly approved tax-specific content profile; current profiles are recordkeeping only');
+    }
+    return {idea,profile,content};
+  }
+  async approve(id:string){const idea=this.get(id);if(!idea)return undefined;if(!['DRAFT','REJECTED','FAILED'].includes(idea.status))throw new Error('Only draft, rejected, or failed ideas can be approved');await this.validateForProduction(idea);return this.store.transaction(()=>{const current=this.get(id);if(!current||current.jobId||JSON.stringify(current)!==JSON.stringify(idea)||!['DRAFT','REJECTED','FAILED'].includes(current.status))throw new Error('Idea changed or is already bound to a job; reload before approving');return this.setStatus(id,'APPROVED',null);});}
+  reject(id:string){const idea=this.get(id);if(!idea)return undefined;if(['QUEUED','READY_FOR_APPROVAL','PRODUCED'].includes(idea.status))throw new Error('An idea with a produced job cannot be rejected here');return this.store.transaction(()=>this.setStatus(id,'REJECTED',idea.jobId));}
+  private setStatus(id:string,status:BacklogIdea['status'],jobId:string|null){const row=this.get(id);if(!row)throw new Error('Backlog idea not found');const {jobId:_jobId,createdAt:_createdAt,updatedAt:_updatedAt,...data}=row;const updated={...data,status};const now=new Date().toISOString();this.store.db.prepare('UPDATE backlog_ideas SET status=?,data=?,job_id=?,updated_at=? WHERE id=?').run(status,JSON.stringify(updated),jobId,now,id);return this.get(id)!;}
+  async produce(id:string,idempotencyKey='backlog:'+id){const idea=this.get(id);if(!idea)return undefined;if(idea.status!=='APPROVED'&&idea.status!=='QUEUED')throw new Error('Only an approved idea can be produced');await this.validateForProduction(idea);return this.store.transaction(()=>{const current=this.get(id);if(!current||JSON.stringify(current)!==JSON.stringify(idea)||!['APPROVED','QUEUED'].includes(current.status))throw new Error('Idea changed; reload before producing');return this.bindJob(current,idempotencyKey);});}
+  async produceScheduled(projectId:string,idempotencyKey:string):Promise<JobRow|undefined>{
+    const existing=this.store.getByIdempotencyKey(idempotencyKey);if(existing)return existing;
+    const candidates=this.list(projectId).filter((idea)=>idea.status==='APPROVED'&&!idea.jobId);
+    let blockedReason:string|undefined;for(const idea of candidates){try{await this.validateForProduction(idea);}catch(error){blockedReason=error instanceof Error?error.message:String(error);continue;}return this.store.transaction(()=>{const duplicate=this.store.getByIdempotencyKey(idempotencyKey);if(duplicate)return duplicate;const current=this.get(idea.id);if(!current||current.status!=='APPROVED'||current.jobId||JSON.stringify(current)!==JSON.stringify(idea))return undefined;return this.bindJob(current,idempotencyKey);});}
+    throw new Error('No approved backlog idea available for '+projectId+(blockedReason?': '+blockedReason:''));
+  }
+  private bindJob(idea:BacklogIdea,idempotencyKey:string){if(idea.jobId){const existing=this.store.get(idea.jobId);if(existing)return existing;throw new Error('Backlog idea has a missing job binding');}const job=this.store.createInsideTransaction({projectId:idea.projectId,topic:idea.topic,contentId:idea.contentId,template:idea.template,idempotencyKey});this.setStatus(idea.id,'QUEUED',job.id);this.store.event(job.id,'backlog-bound',{ideaId:idea.id});return job;}
+}
