@@ -2,19 +2,31 @@ import express,{type NextFunction,type Request,type Response} from 'express';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {existsSync} from 'node:fs';
+import {readFile,rename,writeFile} from 'node:fs/promises';
 import {z} from 'zod';
-import {ARTIFACTS_DIR,DB_PATH,HOST,PORT,ROOT_DIR,loadProfile,loadProfiles} from './config.js';
+import {ARTIFACTS_DIR,CONFIG_DIR,DATA_DIR,DB_PATH,HOST,PORT,ROOT_DIR,loadProfile,loadProfiles} from './config.js';
 import {templateSchema} from './domain.js';
 import {checkOllama,discoverBonsai} from './models.js';
 import {Pipeline} from './pipeline.js';
 import {JobStore} from './store.js';
 import {BacklogService} from './backlog.js';
 import {productionGate,Scheduler} from './scheduler.js';
+import {IdeaService} from './ideas.js';
+import {KnowledgeRegistry,knowledgeRegistrySchema,knowledgeSourceSchema} from './knowledge.js';
 const artifactNames=new Set(['video.mp4','poster.jpg','script.json','metadata.json','qa.json']);
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const jobInput=z.object({projectId:z.string().min(1),topic:z.string().trim().min(1).max(300),contentId:z.string().min(1),template:templateSchema.optional(),idempotencyKey:z.string().min(1).max(200).optional()}).strict();
+const ideaRunInput=z.object({projectId:z.string().min(1),idempotencyKey:z.string().min(1).max(200),count:z.literal(3).default(3)}).strict();
+const ideaRejectInput=z.object({note:z.string().trim().min(1).max(500).optional()}).strict();
+const ideaRegenerateInput=z.object({idempotencyKey:z.string().min(1).max(200)}).strict();
+let registryWrite=Promise.resolve();
+function validateKnowledgeConfig(value:unknown){const config=knowledgeRegistrySchema.parse(value),unique=(values:string[],label:string)=>{if(new Set(values).size!==values.length)throw new Error(label+' must be unique');};unique(config.sources.map(source=>source.id),'Knowledge source IDs');unique(config.projects.map(project=>project.id),'Knowledge project IDs');unique(config.sources.flatMap(source=>source.selectors.map(selector=>selector.claimId)),'Knowledge claim IDs');const projectIds=new Set(config.projects.map(project=>project.id));if(config.sources.some(source=>source.selectors.some(selector=>!projectIds.has(selector.projectId))))throw new Error('Knowledge selector references unknown project');return config;}
+async function persistKnowledgeSource(registry:KnowledgeRegistry,value:unknown){
+  const source=knowledgeSourceSchema.parse(value),filename=path.join(CONFIG_DIR,'knowledge.json');let saved:typeof source|undefined;
+  const operation=registryWrite.catch(()=>{}).then(async()=>{const current=validateKnowledgeConfig(JSON.parse(await readFile(filename,'utf8'))),validated=await registry.registerSource(source),next=validateKnowledgeConfig({...current,sources:[...current.sources.filter(entry=>entry.id!==validated.id),validated]});const temp=filename+'.tmp-'+process.pid+'-'+Date.now();await writeFile(temp,JSON.stringify(next,null,2)+'\n',{mode:0o600,flag:'wx'});await rename(temp,filename);saved=validated;});registryWrite=operation;await operation;return saved!;
+}
 export function createApp(store:JobStore,pipeline?:Pipeline){
-  const app=express(),backlog=new BacklogService(store);app.disable('x-powered-by');const streams=new Set<()=>void>();app.locals.closeStreams=()=>{for(const close of streams)close();};
+  const app=express(),backlog=new BacklogService(store),ideas=pipeline?.ideas??new IdeaService(store),knowledge=new KnowledgeRegistry();app.disable('x-powered-by');const streams=new Set<()=>void>();app.locals.closeStreams=()=>{for(const close of streams)close();};
   const allowedHosts=new Set([HOST+':'+PORT,'localhost:'+PORT]);
   app.use((req,res,next)=>{
     if(!allowedHosts.has(req.headers.host??''))return res.status(403).json({error:'Foreign Host rejected'});
@@ -30,6 +42,17 @@ export function createApp(store:JobStore,pipeline?:Pipeline){
     if(!req.is('application/json'))return res.status(415).json({error:'Mutations require application/json'});next();
   };
   app.get('/api/projects',async(_req,res)=>res.json(await loadProfiles()));
+  app.get('/api/knowledge',async(_req,res)=>res.json(await knowledge.refresh()));
+  app.get('/api/knowledge/sources/:id',async(req,res)=>res.json(await knowledge.inspectSource(param(req.params.id))));
+  app.post('/api/knowledge/refresh',mutationGuard,async(_req,res)=>res.json(await knowledge.refresh()));
+  app.post('/api/knowledge/register',mutationGuard,async(req,res)=>res.status(201).json(await persistKnowledgeSource(knowledge,knowledgeSourceSchema.parse(req.body))));
+  app.get('/api/ideas',(req,res)=>res.json(ideas.list(typeof req.query.projectId==='string'?req.query.projectId:undefined)));
+  app.get('/api/idea-runs',(_req,res)=>res.json(ideas.runs()));
+  app.get('/api/idea-runs/:id',async(req,res)=>{const id=z.uuid().parse(param(req.params.id)),run=ideas.getRun(id);if(!run)return res.status(404).json({error:'Not found'});const events=(store.db.prepare('SELECT id,type,data,created_at FROM idea_events WHERE run_id=? ORDER BY id').all(id) as Array<{id:number;type:string;data:string;created_at:string}>).map(event=>({...event,data:JSON.parse(event.data),createdAt:event.created_at}));let provenance:unknown=null;try{provenance=JSON.parse(await readFile(path.join(DATA_DIR,'idea-runs',id+'.json'),'utf8'));}catch{/* queued, failed, or legacy run */}res.json({...run,candidates:ideas.list(run.projectId).filter(idea=>idea.runId===id),events,provenance});});
+  app.post('/api/idea-runs',mutationGuard,async(req,res)=>{const input=ideaRunInput.parse(req.body);res.status(202).json(await ideas.enqueue(input.projectId,input.idempotencyKey,input.count));});
+  app.post('/api/ideas/:id/approve',mutationGuard,async(req,res)=>{const idea=await ideas.approve(z.uuid().parse(param(req.params.id)));if(!idea)return res.status(404).json({error:'Not found'});res.json(idea);});
+  app.post('/api/ideas/:id/reject',mutationGuard,(req,res)=>{const input=ideaRejectInput.parse(req.body),idea=ideas.reject(z.uuid().parse(param(req.params.id)),input.note);if(!idea)return res.status(404).json({error:'Not found'});res.json(idea);});
+  app.post('/api/ideas/:id/regenerate',mutationGuard,async(req,res)=>{const input=ideaRegenerateInput.parse(req.body);res.status(202).json(await ideas.regenerate(z.uuid().parse(param(req.params.id)),input.idempotencyKey));});
   app.get('/api/jobs',(req,res)=>res.json(store.list(Number(req.query.limit??100))));
   app.get('/api/jobs/:id',(req,res)=>{const j=store.get(param(req.params.id));if(!j)return res.status(404).json({error:'Not found'});res.json({...j,events:store.events(0,j.id)});});
   app.get('/api/status',async(_req,res)=>{
@@ -60,7 +83,7 @@ export function createApp(store:JobStore,pipeline?:Pipeline){
   for(const action of ['cancel','retry','approve','reject'] as const){
     app.post('/api/jobs/:id/'+action,mutationGuard,(req,res)=>{const id=z.uuid().parse(param(req.params.id));const j=action==='cancel'?(pipeline?pipeline.cancel(id):store.requestCancel(id)):action==='retry'?store.retry(id):store.review(id,action==='approve'?'APPROVED':'REJECTED',req.body?.note);if(!j)return res.status(404).json({error:'Not found'});res.json(j);});
   }
-  app.post('/api/jobs/:id/regenerate',mutationGuard,async(req,res)=>{const id=z.uuid().parse(param(req.params.id)),prior=store.get(id);if(!prior)return res.status(404).json({error:'Not found'});const profile=await loadProfile(prior.projectId);if(!profile.approvedContent.some((content)=>content.id===prior.contentId))return res.status(400).json({error:'Content is no longer approved'});if(!profile.templates.includes(templateSchema.parse(prior.template)))return res.status(400).json({error:'Template is no longer approved'});res.status(202).json(store.regenerate(id,{projectId:prior.projectId,topic:prior.topic,contentId:prior.contentId,template:prior.template}));});
+  app.post('/api/jobs/:id/regenerate',mutationGuard,async(req,res)=>{const id=z.uuid().parse(param(req.params.id)),prior=store.get(id);if(!prior)return res.status(404).json({error:'Not found'});let profile=await loadProfile(prior.projectId);if(!profile.approvedContent.some(content=>content.id===prior.contentId)){const bound=backlog.list(prior.projectId).find(idea=>idea.contentId===prior.contentId);if(!bound)return res.status(400).json({error:'Content is no longer approved'});const validated=await backlog.validateForProduction(bound);if(validated.content.topic!==prior.topic)return res.status(400).json({error:'Proposal content identity changed'});profile=validated.profile;}if(!profile.approvedContent.some(content=>content.id===prior.contentId))return res.status(400).json({error:'Content is no longer approved'});if(!profile.templates.includes(templateSchema.parse(prior.template)))return res.status(400).json({error:'Template is no longer approved'});res.status(202).json(store.regenerate(id,{projectId:prior.projectId,topic:prior.topic,contentId:prior.contentId,template:prior.template}));});
   app.get('/artifacts/:jobId/:filename',(req,res)=>{
     const id=param(req.params.jobId),name=param(req.params.filename);if(!uuid.test(id)||!artifactNames.has(name))return res.status(404).end();
     const job=store.get(id);if(!job||job.qaPassed!==1||!['READY_FOR_REVIEW','APPROVED','REJECTED'].includes(job.status))return res.status(404).end();

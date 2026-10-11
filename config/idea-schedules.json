@@ -1,0 +1,24 @@
+[
+  {
+    "id": "whodunnit-weekly-ideas",
+    "projectId": "whodunnit",
+    "frequency": "weekly",
+    "weekday": 0,
+    "hour": 0,
+    "minute": 0,
+    "timezone": "America/Chicago",
+    "count": 3,
+    "enabled": true
+  },
+  {
+    "id": "gigwise-weekly-ideas",
+    "projectId": "gigwise",
+    "frequency": "weekly",
+    "weekday": 0,
+    "hour": 0,
+    "minute": 0,
+    "timezone": "America/Chicago",
+    "count": 3,
+    "enabled": true
+  }
+]

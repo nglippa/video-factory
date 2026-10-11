@@ -4,6 +4,8 @@ A local TypeScript queue that turns approved project briefs into 1080 × 1920, 3
 
 Phase 2 adds a persistent content backlog, automatic daily selection of approved ideas, pause/resume, production windows, resource gates, automatic bounded retries, and script/model review in the dashboard. See [Phase 2 verification](docs/PHASE2-VERIFICATION.md). Public publishing is unavailable.
 
+Phase 3 adds a reviewed local knowledge registry and scheduled Qwen idea proposals, with evidence, duplicate checks, ranking and explicit idea approval in the dashboard. See [Phase 3 verification](docs/PHASE3-VERIFICATION.md).
+
 The active local LaunchAgents run the factory (with its integrated scheduler) and Ollama. Open **http://127.0.0.1:4317**. The factory runs after login without an open terminal, while the Mac is awake. Sleep settings are unchanged.
 
 ## Startup
@@ -101,7 +103,7 @@ Normal npm start uses process environment variables and does not implicitly load
 
 ## Unattended operation and launchd
 
-The server runs the scheduler every 60 seconds and the queue worker. `config/schedules.json` enables daily backlog slots at 09:00 for Whodunnit and 09:10 for GigWise, America/Chicago. `config/production.json` permits new work from **08:00 until 22:00**. A late invocation catches up today's due slots; earlier days are not backfilled. Overnight windows are supported (start later than end). Jobs in progress may finish after the window closes.
+The server runs the scheduler every 60 seconds and the queue worker. `config/schedules.json` enables daily backlog slots at 09:00 for Whodunnit and 09:10 for GigWise, America/Chicago. `config/production.json` currently permits new work from **22:00 until 06:00**. A late invocation catches up today's due slots; earlier days are not backfilled. With this overnight window, the 09:00/09:10 slots become eligible at 22:00 that evening. Jobs in progress may finish after the window closes.
 
 Each slot atomically binds one approved, unused content idea to a unique schedule ID + local date job key. Reruns and restarts return the same job. A used idea is never consumed again automatically. An empty/blocked backlog is reported for the relevant slot; other valid slots continue. Import and approve additional ideas to keep production supplied.
 
@@ -162,7 +164,7 @@ npm run cli -- schedule --file config/schedules.json
 
 `config/backlog.json` seeds two approved ideas from the already approved project content, idempotently. SQLite is authoritative after import. Each idea includes project, topic, audience, message, hook, required approved asset IDs, source references and verification labels, template, content ID, content/publishing approval requirements, status, tax year/claim flags, and synthetic-demo/provenance fields.
 
-Import a JSON object or array using the same fields as the seed entries **without `status`** and with new unique IDs. Imports always become DRAFT, including Qwen proposals supplied by an operator; no external research is enabled. They must be inspected and approved before scheduling. Proposals cannot introduce copy outside the project profile's approved topic, hook and message. This release does not automate research or idea-proposal inference; Qwen generates the video script after an approved idea is selected.
+Import a JSON object or array using the same fields as the seed entries **without `status`** and with new unique IDs. Imports always become DRAFT and must be inspected and approved before scheduling. Ordinary imports must match the project profile's approved topic, hook and message. Qwen-generated proposals use the separate reviewed knowledge and approval workflow below; imported provenance cannot grant proposal approval. No external research is enabled.
 
 ~~~sh
 npm run cli -- backlog import --file /absolute/path/ideas.json
@@ -172,6 +174,29 @@ npm run cli -- backlog produce --id IDEA_ID
 ~~~
 
 Approve content in the dashboard or CLI only after checking its sources. Ideas bound to a job cannot be edited. Their status follows technical completion and human video review. Whodunnit examples must be labeled synthetic and use the exact approved pair. GigWise ideas with tax claims require a tax year and operator-verified authoritative IRS references, and remain blocked until explicitly approved tax-specific project copy is supported. Existing GigWise content makes only recordkeeping/product claims. No scraping, fabricated research, guaranteed detector evasion, or automatic public publishing is implemented.
+
+## Reviewed knowledge and idea proposals
+
+`config/knowledge.json` registers explicitly reviewed JSON or Markdown sources within this workspace. Each descriptor pins the exact file SHA-256 and selects individual JSON pointers or Markdown line ranges. Hidden paths, traversal, symlinks, hardlinks, secret/private paths and files over 256 KiB are denied. Changed source bytes make the affected knowledge incomplete and invalidate existing proposal approval. Whodunnit and GigWise have limited approved sources; the other three projects remain incomplete.
+
+`config/idea-schedules.json` queues three candidates for each enabled project weekly on Sunday at 00:00 America/Chicago. Schedule ID plus local date deduplicates the run across restarts. The worker respects pause, production windows and resource gates, gives video jobs priority, and holds a shared operation lease during generation and ranking. Qwen must unload successfully before either call can finish.
+
+Qwen selects exact approved text, available templates and approved media asset IDs. Evidence IDs are resolved deterministically against the selected text; raw model output is retained separately. Validation rejects unsupported wording, assets, tax claims and duplicate topics/hooks from candidates, backlog entries and known video artifacts. A narrow source set can yield three rejected candidates; generation never relaxes the evidence or duplicate checks. Valid candidates are ranked and become `AWAITING_IDEA_APPROVAL`. Ranking failure retains unranked proposals and diagnostics, while unload failure retries the whole run without partial candidates. Runs retry at most three times with backoff.
+
+~~~sh
+npm run cli -- knowledge list
+npm run cli -- knowledge refresh
+npm run cli -- knowledge inspect --id gigwise-profile
+npm run cli -- ideas generate --project gigwise --key my-reviewed-ideas
+npm run cli -- ideas runs
+npm run cli -- ideas run --id RUN_UUID
+npm run cli -- ideas list --project gigwise
+npm run cli -- ideas approve --id IDEA_UUID
+npm run cli -- ideas reject --id IDEA_UUID --note 'Reason for rejection'
+npm run cli -- ideas regenerate --id IDEA_UUID --key my-new-run
+~~~
+
+`ideas generate` queues work for the running factory. If the server is unavailable, it persists the queue entry for the next startup. In the dashboard, inspect Approved knowledge and Idea review, then approve a proposal to bind it to the content backlog. This approval is separate from finished-video approval. Source snapshots and approved candidate fields are checked again before production. Registration uses `knowledge register --descriptor JSON` with the same descriptor fields as `config/knowledge.json`; only descriptors for sources already reviewed by the operator should be supplied.
 
 ## Projects and approved assets
 

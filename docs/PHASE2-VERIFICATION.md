@@ -1,5 +1,7 @@
 # Local Video Factory — Phase 2 verification
 
+This records Phase 2 behavior at verification time. The current source-grounded idea workflow and overnight production window are documented in [Phase 3 verification](PHASE3-VERIFICATION.md).
+
 Verified on October 10–11, 2026, America/Chicago. The implementation extended the existing TypeScript/SQLite/Remotion application. No public publishing was performed.
 
 ## Revisions and starting state

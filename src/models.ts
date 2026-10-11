@@ -1,5 +1,6 @@
 import {approvedAssets} from './assets.js';
 import {templateSchema, validateTrustedScript, type ProjectProfile, type Template, type VideoScript} from './domain.js';
+import {z,type ZodType} from 'zod';
 
 export type ModelAttempt = {provider:string;model?:string;startedAt:string;finishedAt:string;request:unknown;response?:unknown;error?:string;unload?:{ok:boolean;error?:string}};
 export type ModelResult = {script:VideoScript;attempts:ModelAttempt[];warning?:string;metadata:Record<string,unknown>};
@@ -51,6 +52,19 @@ export async function checkOllama(signal?:AbortSignal) {
   const unfamiliar=loaded.filter((name)=>name!==selected.name);
   if(unfamiliar.length) throw new Error(`Ollama resource busy: unfamiliar model(s) loaded: ${unfamiliar.join(', ')}`);
   return {base,selected,tags:(tags.models??[]).map((m)=>m.name),loaded,modelDetails:tags.models??[]};
+}
+
+export type StructuredQwenResult<T>={value:T;attempt:ModelAttempt;prompt:string;raw:Record<string,unknown>;model:{name:string;digest?:string;size?:number};metrics:{evalCount:number;promptEvalCount:number|null;totalDurationNs:number|null}};
+export async function generateStructuredQwen<T>(prompt:string,schema:ZodType<T>,signal?:AbortSignal):Promise<StructuredQwenResult<T>>{
+  const health=await checkOllama(signal),model=health.selected.name,request={model,prompt,stream:false,format:z.toJSONSchema(schema),think:false,options:{temperature:0,seed:42,num_ctx:4096,num_predict:2400},keep_alive:0};
+  const attempt:ModelAttempt={provider:'ollama',model,startedAt:new Date().toISOString(),finishedAt:'',request};let raw:Record<string,unknown>={},value:T|undefined,primaryError:Error|undefined;
+  try{raw=await (await localFetch(health.base,'/api/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request),signal},180_000)).json() as Record<string,unknown>;attempt.response=raw;if(raw.done!==true||raw.done_reason==='length'||raw.model!==model||typeof raw.eval_count!=='number'||raw.eval_count<1)throw new Error('Ollama did not return a complete structured generation with the selected model identity and metrics');if(typeof raw.response!=='string')throw new Error('Ollama response did not contain JSON text');value=schema.parse(JSON.parse(raw.response));
+  }catch(error){primaryError=error instanceof Error?error:new Error(String(error));attempt.error=primaryError.message;
+  }finally{attempt.finishedAt=new Date().toISOString();try{await localFetch(health.base,'/api/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model,prompt:'',keep_alive:0,stream:false})},10_000);const after=await checkOllama();if(after.loaded.length)throw new Error('Qwen remained loaded after structured generation');attempt.unload={ok:true};}catch(error){attempt.unload={ok:false,error:error instanceof Error?error.message:String(error)};}}
+  const attach=(error:Error)=>Object.assign(error,{attempt,raw,prompt});
+  if(primaryError)throw attach(primaryError);
+  if(attempt.unload?.ok!==true){const error=new Error('Qwen unload failed after structured generation: '+(attempt.unload?.error??'unknown cleanup failure'));attempt.error=error.message;throw attach(error);}
+  return {value:value!,attempt,prompt,raw,model:health.selected,metrics:{evalCount:raw.eval_count as number,promptEvalCount:typeof raw.prompt_eval_count==='number'?raw.prompt_eval_count:null,totalDurationNs:typeof raw.total_duration==='number'?raw.total_duration:null}};
 }
 
 async function qwen(profile:ProjectProfile,input:{topic:string;contentId:string;template:Template},signal?:AbortSignal) {

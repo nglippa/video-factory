@@ -7,7 +7,7 @@ import http from 'node:http';
 import type {AddressInfo} from 'node:net';
 import {JobStore} from '../src/store.js';
 import {BacklogService} from '../src/backlog.js';
-import {dueSchedules,productionGate,type ProductionConfig} from '../src/scheduler.js';
+import {dueSchedules,dueIdeaSchedules,runDueIdeaSchedules,productionGate,type ProductionConfig} from '../src/scheduler.js';
 import {createApp} from '../src/server.js';
 import {PORT} from '../src/config.js';
 
@@ -24,19 +24,28 @@ test('cancellation stays terminal and blocked tax ideas cannot be approved',asyn
 
 test('backlog schedules keep direct schedule compatibility and stable day keys',()=>{const now=new Date('2026-10-10T16:00:00Z'),directSchedule={id:'direct',projectId:'whodunnit',topic:'Clearer writing, same meaning',contentId:'clear-writing',template:'before-after' as const,hour:9,minute:0,timezone:'America/Chicago',enabled:true},backlogSchedule={id:'ideas',projectId:'gigwise',hour:9,minute:0,timezone:'America/Chicago',enabled:true,useBacklog:true};const due=dueSchedules([directSchedule,backlogSchedule],now);assert.equal(due.length,2);assert.equal(due[0]?.idempotencyKey,'schedule:direct:2026-10-10');assert.equal(due[1]?.idempotencyKey,'schedule:ideas:2026-10-10');});
 
+test('weekly idea slots follow the local weekday and persist one three-candidate run across restart',async()=>{
+  const schedule={id:'weekly',projectId:'gigwise',frequency:'weekly',weekday:0,hour:0,minute:30,timezone:'America/Chicago',count:3,enabled:true};
+  assert.deepEqual(dueIdeaSchedules([schedule],new Date('2026-10-11T04:59:00Z')),[]);assert.deepEqual(dueIdeaSchedules([schedule],new Date('2026-10-11T05:29:00Z')),[]);
+  const now=new Date('2026-10-11T05:30:00Z');assert.equal(dueIdeaSchedules([schedule],now)[0]?.idempotencyKey,'idea-schedule:weekly:2026-10-11');
+  assert.deepEqual(dueIdeaSchedules([{...schedule,enabled:false}],now),[]);assert.deepEqual(dueIdeaSchedules([schedule],new Date('2026-10-12T06:00:00Z')),[]);
+  const dir=await mkdtemp(path.join(os.tmpdir(),'idea-schedule-')),filename=path.join(dir,'factory.sqlite');let store=new JobStore(filename);
+  try{const first=(await runDueIdeaSchedules(store,[schedule],now))[0]!;assert.equal(first.count,3);assert.equal(first.status,'QUEUED');store.close();store=new JobStore(filename);assert.equal((await runDueIdeaSchedules(store,[schedule],now))[0]?.id,first.id);assert.equal(store.db.prepare('SELECT COUNT(*) count FROM idea_runs').get()?.count,1);}finally{store.close();await rm(dir,{recursive:true,force:true});}
+});
+
 test('production and backlog API mutations retain host and origin guards',async()=>{const store=new JobStore(':memory:'),backlog=new BacklogService(store);await backlog.seed();const app=createApp(store),server=app.listen(0,'127.0.0.1');await new Promise<void>((resolve)=>server.once('listening',resolve));const base='http://127.0.0.1:'+(server.address() as AddressInfo).port;const request=(route:string,origin?:string)=>new Promise<{status:number;body:any}>((resolve,reject)=>{const req=http.request(base+route,{method:'POST',headers:{host:'127.0.0.1:'+PORT,'content-type':'application/json',...origin?{origin}:{}}},(response)=>{let raw='';response.on('data',(chunk)=>raw+=chunk);response.on('end',()=>resolve({status:response.statusCode!,body:JSON.parse(raw)}));});req.on('error',reject);req.end('{}');});try{assert.equal((await request('/api/production/pause','https://evil.example')).status,403);assert.equal((await request('/api/production/pause')).status,200);assert.equal(store.production().paused,true);assert.equal((await request('/api/production/resume')).status,200);assert.equal(store.production().paused,false);assert.equal((await request('/api/backlog/missing/produce')).status,404);}finally{app.locals.closeStreams();await new Promise<void>((resolve)=>server.close(()=>resolve()));store.close();}});
 
 test('scheduler records invalid configuration and recovers after restart without duplicating jobs',async()=>{
-  const dir=await mkdtemp(path.join(os.tmpdir(),'video-scheduler-recovery-')),filename=path.join(dir,'factory.sqlite'),scheduleFile=path.join(dir,'schedules.json');
+  const dir=await mkdtemp(path.join(os.tmpdir(),'video-scheduler-recovery-')),filename=path.join(dir,'factory.sqlite'),scheduleFile=path.join(dir,'schedules.json'),ideaScheduleFile=path.join(dir,'idea-schedules.json'),now=new Date('2026-10-11T04:00:00Z');
   const {writeFile}=await import('node:fs/promises');const {Scheduler}=await import('../src/scheduler.js');
   let store=new JobStore(filename);
   try{
-    await new BacklogService(store).seed();await writeFile(scheduleFile,'invalid JSON');
-    await new Scheduler(store,scheduleFile).tick(new Date('2026-10-10T16:00:00Z'));assert.match(store.production().error!,/JSON/);
+    await new BacklogService(store).seed();await writeFile(scheduleFile,'invalid JSON');await writeFile(ideaScheduleFile,'[]');
+    await new Scheduler(store,scheduleFile,60_000,ideaScheduleFile).tick(now);assert.match(store.production().error!,/JSON/);
     store.close();store=new JobStore(filename);assert.match(store.production().error!,/JSON/);
     await writeFile(scheduleFile,JSON.stringify([{id:'recovery',projectId:'whodunnit',hour:9,minute:0,timezone:'America/Chicago',enabled:true,useBacklog:true}]));
-    const scheduler=new Scheduler(store,scheduleFile);const first=await scheduler.tick(new Date('2026-10-10T16:00:00Z'));assert.equal(first.length,1);assert.equal(store.production().error,null);
-    const second=await scheduler.tick(new Date('2026-10-10T16:00:00Z'));assert.equal(second[0]?.id,first[0]?.id);assert.equal(store.list().length,1);
+    const scheduler=new Scheduler(store,scheduleFile,60_000,ideaScheduleFile);const first=await scheduler.tick(now);assert.equal(first.length,1);assert.equal(store.production().error,null);
+    const second=await scheduler.tick(now);assert.equal(second[0]?.id,first[0]?.id);assert.equal(store.list().length,1);
     store.claim('crashed');store.db.prepare("UPDATE jobs SET lease_expires_at='2000-01-01T00:00:00Z'").run();store.close();store=new JobStore(filename);
     const recovered=store.claim('replacement');assert.equal(recovered?.id,first[0]?.id);assert.equal(recovered?.attempts,2);assert.equal(store.update(first[0]!.id,'FAILED',{owner:'crashed'}),false);
     assert.ok(store.events(0,first[0]!.id).some(e=>e.type==='lease-recovered'));

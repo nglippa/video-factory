@@ -1,0 +1,280 @@
+{
+  "sources": [
+    {
+      "id": "whodunnit-profile",
+      "path": "config/projects/whodunnit.json",
+      "category": "product-description",
+      "reviewed": true,
+      "reviewedSha256": "4437408f7ef0c06d36a255792c551d8dd563acbb92508ef84d051dc443ba2fa1",
+      "selectors": [
+        {
+          "claimId": "wh-topic",
+          "projectId": "whodunnit",
+          "kind": "description",
+          "pointer": "/approvedContent/0/topic"
+        },
+        {
+          "claimId": "wh-title",
+          "projectId": "whodunnit",
+          "kind": "marketing",
+          "pointer": "/approvedContent/0/title"
+        },
+        {
+          "claimId": "wh-hook",
+          "projectId": "whodunnit",
+          "kind": "marketing",
+          "pointer": "/approvedContent/0/hook"
+        },
+        {
+          "claimId": "wh-body",
+          "projectId": "whodunnit",
+          "kind": "marketing",
+          "pointer": "/approvedContent/0/body"
+        },
+        {
+          "claimId": "wh-before",
+          "projectId": "whodunnit",
+          "kind": "demo",
+          "pointer": "/approvedContent/0/before"
+        },
+        {
+          "claimId": "wh-after",
+          "projectId": "whodunnit",
+          "kind": "demo",
+          "pointer": "/approvedContent/0/after"
+        },
+        {
+          "claimId": "wh-demo-label",
+          "projectId": "whodunnit",
+          "kind": "demo",
+          "pointer": "/approvedContent/0/disclaimer"
+        },
+        {
+          "claimId": "wh-cta",
+          "projectId": "whodunnit",
+          "kind": "cta",
+          "pointer": "/cta"
+        },
+        {
+          "claimId": "wh-template-0",
+          "projectId": "whodunnit",
+          "kind": "template",
+          "pointer": "/templates/0"
+        },
+        {
+          "claimId": "wh-template-1",
+          "projectId": "whodunnit",
+          "kind": "template",
+          "pointer": "/templates/1"
+        },
+        {
+          "claimId": "wh-asset-dir",
+          "projectId": "whodunnit",
+          "kind": "asset",
+          "pointer": "/assetDirectories/0"
+        },
+        {
+          "claimId": "wh-voice",
+          "projectId": "whodunnit",
+          "kind": "voice",
+          "pointer": "/voice/0"
+        },
+        {
+          "claimId": "wh-prohibited",
+          "projectId": "whodunnit",
+          "kind": "prohibited",
+          "pointer": "/restrictions/1"
+        },
+        {
+          "claimId": "wh-voice-1",
+          "projectId": "whodunnit",
+          "kind": "voice",
+          "pointer": "/voice/1"
+        },
+        {
+          "claimId": "wh-voice-2",
+          "projectId": "whodunnit",
+          "kind": "voice",
+          "pointer": "/voice/2"
+        },
+        {
+          "claimId": "wh-prohibited-0",
+          "projectId": "whodunnit",
+          "kind": "prohibited",
+          "pointer": "/restrictions/0"
+        },
+        {
+          "claimId": "wh-prohibited-2",
+          "projectId": "whodunnit",
+          "kind": "prohibited",
+          "pointer": "/restrictions/2"
+        },
+        {
+          "claimId": "wh-brand-asset",
+          "projectId": "whodunnit",
+          "kind": "asset",
+          "pointer": "/logo/value"
+        }
+      ]
+    },
+    {
+      "id": "gigwise-profile",
+      "path": "config/projects/gigwise.json",
+      "category": "feature-doc",
+      "reviewed": true,
+      "reviewedSha256": "e54dabdc03974d76925110c6aa3225bca68a597d9447a74fab14aa1863369f8e",
+      "selectors": [
+        {
+          "claimId": "gw-topic",
+          "projectId": "gigwise",
+          "kind": "description",
+          "pointer": "/approvedContent/0/topic"
+        },
+        {
+          "claimId": "gw-title",
+          "projectId": "gigwise",
+          "kind": "marketing",
+          "pointer": "/approvedContent/0/title"
+        },
+        {
+          "claimId": "gw-hook",
+          "projectId": "gigwise",
+          "kind": "marketing",
+          "pointer": "/approvedContent/0/hook"
+        },
+        {
+          "claimId": "gw-body",
+          "projectId": "gigwise",
+          "kind": "capability",
+          "pointer": "/approvedContent/0/body"
+        },
+        {
+          "claimId": "gw-lesson-0",
+          "projectId": "gigwise",
+          "kind": "marketing",
+          "pointer": "/approvedContent/0/lessons/0"
+        },
+        {
+          "claimId": "gw-lesson-1",
+          "projectId": "gigwise",
+          "kind": "marketing",
+          "pointer": "/approvedContent/0/lessons/1"
+        },
+        {
+          "claimId": "gw-disclaimer",
+          "projectId": "gigwise",
+          "kind": "marketing",
+          "pointer": "/approvedContent/0/disclaimer"
+        },
+        {
+          "claimId": "gw-cta",
+          "projectId": "gigwise",
+          "kind": "cta",
+          "pointer": "/cta"
+        },
+        {
+          "claimId": "gw-template-0",
+          "projectId": "gigwise",
+          "kind": "template",
+          "pointer": "/templates/0"
+        },
+        {
+          "claimId": "gw-template-1",
+          "projectId": "gigwise",
+          "kind": "template",
+          "pointer": "/templates/1"
+        },
+        {
+          "claimId": "gw-asset-dir",
+          "projectId": "gigwise",
+          "kind": "asset",
+          "pointer": "/assetDirectories/0"
+        },
+        {
+          "claimId": "gw-voice",
+          "projectId": "gigwise",
+          "kind": "voice",
+          "pointer": "/voice/0"
+        },
+        {
+          "claimId": "gw-prohibited",
+          "projectId": "gigwise",
+          "kind": "prohibited",
+          "pointer": "/restrictions/0"
+        },
+        {
+          "claimId": "gw-voice-1",
+          "projectId": "gigwise",
+          "kind": "voice",
+          "pointer": "/voice/1"
+        },
+        {
+          "claimId": "gw-prohibited-1",
+          "projectId": "gigwise",
+          "kind": "prohibited",
+          "pointer": "/restrictions/1"
+        },
+        {
+          "claimId": "gw-prohibited-2",
+          "projectId": "gigwise",
+          "kind": "prohibited",
+          "pointer": "/restrictions/2"
+        },
+        {
+          "claimId": "gw-brand-asset",
+          "projectId": "gigwise",
+          "kind": "asset",
+          "pointer": "/logo/value"
+        }
+      ]
+    },
+    {
+      "id": "approved-backlog",
+      "path": "config/backlog.json",
+      "category": "product-description",
+      "reviewed": true,
+      "reviewedSha256": "715df627c3ba3da877df40dc123709e1489b6033ad8a83538acacc5165833200",
+      "selectors": [
+        {
+          "claimId": "wh-audience",
+          "projectId": "whodunnit",
+          "kind": "audience",
+          "pointer": "/0/targetAudience"
+        },
+        {
+          "claimId": "gw-audience",
+          "projectId": "gigwise",
+          "kind": "audience",
+          "pointer": "/1/targetAudience"
+        }
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "id": "whodunnit",
+      "enabled": true,
+      "scope": "Synthetic demonstration and approved brand copy only"
+    },
+    {
+      "id": "gigwise",
+      "enabled": true,
+      "scope": "Approved recordkeeping capability and education copy only"
+    },
+    {
+      "id": "angband",
+      "enabled": false,
+      "scope": "INCOMPLETE"
+    },
+    {
+      "id": "find-my-needs",
+      "enabled": false,
+      "scope": "INCOMPLETE"
+    },
+    {
+      "id": "terra-steam-tycoon",
+      "enabled": false,
+      "scope": "INCOMPLETE"
+    }
+  ]
+}

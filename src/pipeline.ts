@@ -9,20 +9,21 @@ import {JobStore,type JobRow} from './store.js';
 import {renderVideo} from './render.js';
 import {productionGate} from './scheduler.js';
 import {BacklogService} from './backlog.js';
+import {IdeaService} from './ideas.js';
 async function atomicJson(filename:string,value:unknown){const tmp=filename+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(value,null,2)+'\n',{encoding:'utf8',mode:0o600});await rename(tmp,filename);}
 function message(e:unknown){return e instanceof Error?e.message:String(e);}
 export class Pipeline{
-  readonly owner='worker-'+process.pid+'-'+randomUUID();private active=new Map<string,AbortController>();private timer?:NodeJS.Timeout;private running=false;private stopping=false;
-  constructor(readonly store:JobStore,readonly pollMs=750){}
+  readonly owner='worker-'+process.pid+'-'+randomUUID();readonly ideas:IdeaService;private active=new Map<string,AbortController>();private timer?:NodeJS.Timeout;private running=false;private stopping=false;
+  constructor(readonly store:JobStore,readonly pollMs=750){this.ideas=new IdeaService(store);}
   start(){if(this.timer)return;this.stopping=false;this.timer=setInterval(()=>void this.tick().catch((e)=>console.error('Worker tick failed:',message(e))),this.pollMs);void this.tick().catch((e)=>console.error('Worker startup failed:',message(e)));}
-  async stop(){this.stopping=true;if(this.timer)clearInterval(this.timer);this.timer=undefined;for(const controller of this.active.values())controller.abort(new Error('Worker shutting down'));while(this.running)await new Promise((r)=>setTimeout(r,25));}
+  async stop(){this.stopping=true;if(this.timer)clearInterval(this.timer);this.timer=undefined;for(const controller of this.active.values())controller.abort(new Error('Worker shutting down'));await this.ideas.stop();while(this.running)await new Promise((r)=>setTimeout(r,25));}
   cancel(id:string){const job=this.store.requestCancel(id);this.active.get(id)?.abort(new Error('Cancelled by operator'));return job;}
   async tick(){
     if(this.running||this.stopping)return;this.running=true;
     try{
       let allowed=false;try{const gate=await productionGate(this.store);allowed=gate.allowed;this.store.recordProductionTick(gate.reason);}catch(error){this.store.recordProductionTick('Production gate error',message(error));}
       if(this.stopping)return;
-      const job=this.store.claim(this.owner,30_000,allowed);if(job)await this.process(job);
+      const job=this.store.claim(this.owner,30_000,allowed);if(job)await this.process(job);else if(allowed)await this.ideas.tick();
     }finally{this.running=false;}
   }
   private async process(job:JobRow){
@@ -35,9 +36,9 @@ export class Pipeline{
     try{
       await mkdir(artifactDir,{recursive:true});assertOwned();
       heartbeat=setInterval(()=>{if(!this.store.heartbeat(job.id,this.owner))controller.abort(new Error('Worker lease lost'));if(this.store.get(job.id)?.cancelRequested)controller.abort(new Error('Cancelled by operator'));},5_000);
-      const profile=await loadProfile(job.projectId);const content=profile.approvedContent.find((c)=>c.id===job.contentId);if(!content)throw new Error('Job content is not approved');
+      const baseProfile=await loadProfile(job.projectId),backlog=new BacklogService(this.store),idea=backlog.list(job.projectId).find(entry=>entry.jobId===job.id||(job.contentId.startsWith('proposal:')&&entry.contentId===job.contentId))??null,validated=idea?await backlog.validateForProduction(idea):null,profile=validated?.profile??baseProfile;const content=profile.approvedContent.find((c)=>c.id===job.contentId);if(!content)throw new Error('Job content is not approved');
+      if(validated&&(validated.content.topic!==job.topic||validated.idea.template!==job.template))throw new Error('Job identity differs from approved proposal');
       const template=templateSchema.parse(job.template);
-      const idea=new BacklogService(this.store).list(job.projectId).find(idea=>idea.jobId===job.id)??null;
       await atomicJson(path.join(artifactDir,'profile.json'),profile);await atomicJson(path.join(artifactDir,'request.json'),{jobId:job.id,attempt:job.attempts,projectId:job.projectId,topic:job.topic,contentId:job.contentId,template,createdAt:job.createdAt,idea});
       phase='script';this.store.event(job.id,'progress',{stage:'script',progress:0});
       const generated=await generateScript(profile,{topic:job.topic,contentId:job.contentId,template},controller.signal,()=>transition('REFINING'));attempts=generated.attempts;
