@@ -12,6 +12,9 @@ import {JobStore} from './store.js';
 import {BacklogService} from './backlog.js';
 import {productionGate,Scheduler} from './scheduler.js';
 import {IdeaService} from './ideas.js';
+import {CampaignService} from './campaigns.js';
+import {CommandCenter} from './command-center.js';
+import {campaignId} from './campaign-domain.js';
 import {KnowledgeRegistry,knowledgeRegistrySchema,knowledgeSourceSchema} from './knowledge.js';
 const artifactNames=new Set(['video.mp4','poster.jpg','script.json','metadata.json','qa.json']);
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -26,7 +29,7 @@ async function persistKnowledgeSource(registry:KnowledgeRegistry,value:unknown){
   const operation=registryWrite.catch(()=>{}).then(async()=>{const current=validateKnowledgeConfig(JSON.parse(await readFile(filename,'utf8'))),validated=await registry.registerSource(source),next=validateKnowledgeConfig({...current,sources:[...current.sources.filter(entry=>entry.id!==validated.id),validated]});const temp=filename+'.tmp-'+process.pid+'-'+Date.now();await writeFile(temp,JSON.stringify(next,null,2)+'\n',{mode:0o600,flag:'wx'});await rename(temp,filename);saved=validated;});registryWrite=operation;await operation;return saved!;
 }
 export function createApp(store:JobStore,pipeline?:Pipeline){
-  const app=express(),backlog=new BacklogService(store),ideas=pipeline?.ideas??new IdeaService(store),knowledge=new KnowledgeRegistry();app.disable('x-powered-by');const streams=new Set<()=>void>();app.locals.closeStreams=()=>{for(const close of streams)close();};
+  const app=express(),backlog=new BacklogService(store),ideas=pipeline?.ideas??new IdeaService(store),knowledge=new KnowledgeRegistry(),campaigns=pipeline?.campaigns??new CampaignService(store);app.disable('x-powered-by');const streams=new Set<()=>void>();app.locals.closeStreams=()=>{for(const close of streams)close();};
   const allowedHosts=new Set([HOST+':'+PORT,'localhost:'+PORT]);
   app.use((req,res,next)=>{
     if(!allowedHosts.has(req.headers.host??''))return res.status(403).json({error:'Foreign Host rejected'});
@@ -41,6 +44,13 @@ export function createApp(store:JobStore,pipeline?:Pipeline){
     }
     if(!req.is('application/json'))return res.status(415).json({error:'Mutations require application/json'});next();
   };
+  app.get('/api/command-center/status',async(_req,res)=>res.json(await new CommandCenter().status()));
+  app.get('/api/campaigns',(_req,res)=>res.json(campaigns.list().map(s=>campaigns.overview(s.id))));
+  app.get('/api/campaigns/:id',(req,res)=>{const id=z.literal(campaignId).parse(param(req.params.id)),result=campaigns.overview(id);if(!result)return res.status(404).json({error:'Campaign not initialized'});res.json(result);});
+  app.get('/api/campaigns/:id/exports/:filename',(req,res)=>{const id=z.literal(campaignId).parse(param(req.params.id)),filename=z.enum(['SUMMARY.md','proposals.json','blockers.json','whodunnit.md','gigwise.md','terra-steam-tycoon.md','angband.md','find-my-needs.md']).parse(param(req.params.filename)),directory=campaigns.state(id)?.lastExport;if(!directory)return res.status(404).end();const root=path.join(DATA_DIR,'campaigns',id,'exports'),relative=path.relative(root,directory);if(!relative||relative.startsWith('..')||path.isAbsolute(relative))return res.status(404).end();res.download(path.join(directory,filename),filename);});
+  app.post('/api/campaigns',mutationGuard,async(req,res)=>{z.object({id:z.literal(campaignId)}).strict().parse(req.body);campaigns.initialize();await campaigns.refreshSources();await campaigns.export();res.status(201).json(campaigns.overview());});
+  app.post('/api/campaigns/:id/:action',mutationGuard,async(req,res)=>{const id=z.literal(campaignId).parse(param(req.params.id)),action=z.enum(['start','pause','resume','refresh-sources','retry-pilot','export']).parse(param(req.params.action));z.object({}).strict().parse(req.body);if(action==='export')return res.json({directory:await campaigns.export(id)});res.json(await campaigns.control(action,id));});
+  app.post('/api/campaigns/:campaignId/proposals/:id/:action',mutationGuard,async(req,res)=>{z.literal(campaignId).parse(param(req.params.campaignId));const id=z.string().regex(/^[a-z0-9-]+$/).parse(param(req.params.id)),action=z.enum(['approve','reject','revise']).parse(param(req.params.action)),body=z.object({reason:z.string().trim().min(1).max(2000).optional()}).strict().parse(req.body);if(campaigns.slot(id)?.campaignId!==campaignId)return res.status(404).json({error:'Proposal not found'});res.json(await campaigns.review(id,action,body.reason));});
   app.get('/api/projects',async(_req,res)=>res.json(await loadProfiles()));
   app.get('/api/knowledge',async(_req,res)=>res.json(await knowledge.refresh()));
   app.get('/api/knowledge/sources/:id',async(req,res)=>res.json(await knowledge.inspectSource(param(req.params.id))));

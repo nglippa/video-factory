@@ -12,6 +12,7 @@ import {JobStore,type JobRow} from './store.js';
 import {BacklogService} from './backlog.js';
 import {dueSchedules,productionGate,runDueSchedules,scheduleSchema} from './scheduler.js';
 import {IdeaService} from './ideas.js';
+import {campaignId} from './campaign-domain.js';
 import {KnowledgeRegistry,knowledgeRegistrySchema,knowledgeSourceSchema} from './knowledge.js';
 export {dueSchedules,scheduleSchema} from './scheduler.js';
 const api='http://'+HOST+':'+PORT;
@@ -28,6 +29,11 @@ async function registerKnowledgeSource(value:unknown){const registry=new Knowled
 function offlineIdeaRun(service:IdeaService,id:string){const run=service.getRun(z.uuid().parse(id));if(!run)throw new Error('Idea run not found');const events=(service.store.db.prepare('SELECT id,type,data,created_at FROM idea_events WHERE run_id=? ORDER BY id').all(run.id) as Array<{id:number;type:string;data:string;created_at:string}>).map(event=>({...event,data:JSON.parse(event.data),createdAt:event.created_at}));return readFile(path.join(DATA_DIR,'idea-runs',run.id+'.json'),'utf8').then(raw=>({...run,candidates:service.list(run.projectId).filter(idea=>idea.runId===run.id),events,provenance:JSON.parse(raw)}),()=>({...run,candidates:service.list(run.projectId).filter(idea=>idea.runId===run.id),events,provenance:null}));}
 export async function main(argv=process.argv.slice(2)){
   const command=argv[0],options=args(argv.slice(1));
+  if(command==='campaign'){
+    const action=argv[1]??'status';if(!['init','status','start','pause','resume','refresh-sources','retry-pilot','export'].includes(action))throw new Error('Usage: campaign init|status|start|pause|resume|refresh-sources|retry-pilot|export');
+    const result=action==='init'?await apiRequest('POST','/api/campaigns',{id:campaignId}):await apiRequest(action==='status'?'GET':'POST','/api/campaigns/'+campaignId+(action==='status'?'':'/'+action),action==='status'?undefined:{});
+    if(action==='status'){const {slots,...summary}=result;console.log(JSON.stringify(summary,null,2));}else console.log(JSON.stringify(result,null,2));return;
+  }
   if(command==='doctor'){
     const versions:Record<string,unknown>={node:process.version,profiles:(await loadProfiles()).map((p)=>({id:p.id,enabled:p.enabled})),tools:{}};
     for(const tool of ['ffmpeg','ffprobe','ollama']){const result=spawnSync(tool,tool==='ollama'?['--version']:['-version'],{encoding:'utf8'});(versions.tools as Record<string,unknown>)[tool]={available:result.status===0,version:result.stdout?.split('\n')[0]??null};}

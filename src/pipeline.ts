@@ -10,11 +10,13 @@ import {renderVideo} from './render.js';
 import {productionGate} from './scheduler.js';
 import {BacklogService} from './backlog.js';
 import {IdeaService} from './ideas.js';
+import {CampaignService} from './campaigns.js';
+import {withRenderLease} from './command-center.js';
 async function atomicJson(filename:string,value:unknown){const tmp=filename+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(value,null,2)+'\n',{encoding:'utf8',mode:0o600});await rename(tmp,filename);}
 function message(e:unknown){return e instanceof Error?e.message:String(e);}
 export class Pipeline{
-  readonly owner='worker-'+process.pid+'-'+randomUUID();readonly ideas:IdeaService;private active=new Map<string,AbortController>();private timer?:NodeJS.Timeout;private running=false;private stopping=false;
-  constructor(readonly store:JobStore,readonly pollMs=750){this.ideas=new IdeaService(store);}
+  readonly owner='worker-'+process.pid+'-'+randomUUID();readonly ideas:IdeaService;readonly campaigns:CampaignService;private active=new Map<string,AbortController>();private timer?:NodeJS.Timeout;private running=false;private stopping=false;
+  constructor(readonly store:JobStore,readonly pollMs=750){this.ideas=new IdeaService(store);this.campaigns=new CampaignService(store);}
   start(){if(this.timer)return;this.stopping=false;this.timer=setInterval(()=>void this.tick().catch((e)=>console.error('Worker tick failed:',message(e))),this.pollMs);void this.tick().catch((e)=>console.error('Worker startup failed:',message(e)));}
   async stop(){this.stopping=true;if(this.timer)clearInterval(this.timer);this.timer=undefined;for(const controller of this.active.values())controller.abort(new Error('Worker shutting down'));await this.ideas.stop();while(this.running)await new Promise((r)=>setTimeout(r,25));}
   cancel(id:string){const job=this.store.requestCancel(id);this.active.get(id)?.abort(new Error('Cancelled by operator'));return job;}
@@ -23,7 +25,7 @@ export class Pipeline{
     try{
       let allowed=false;try{const gate=await productionGate(this.store);allowed=gate.allowed;this.store.recordProductionTick(gate.reason);}catch(error){this.store.recordProductionTick('Production gate error',message(error));}
       if(this.stopping)return;
-      const job=this.store.claim(this.owner,30_000,allowed);if(job)await this.process(job);else if(allowed)await this.ideas.tick();
+      const job=this.store.claim(this.owner,30_000,allowed&&!this.campaigns.slots().some(s=>s.job));if(job)await this.process(job);else {await this.campaigns.tick();if(allowed&&!this.campaigns.slots().some(s=>s.job))await this.ideas.tick();}
     }finally{this.running=false;}
   }
   private async process(job:JobRow){
@@ -41,13 +43,13 @@ export class Pipeline{
       const template=templateSchema.parse(job.template);
       await atomicJson(path.join(artifactDir,'profile.json'),profile);await atomicJson(path.join(artifactDir,'request.json'),{jobId:job.id,attempt:job.attempts,projectId:job.projectId,topic:job.topic,contentId:job.contentId,template,createdAt:job.createdAt,idea});
       phase='script';this.store.event(job.id,'progress',{stage:'script',progress:0});
-      const generated=await generateScript(profile,{topic:job.topic,contentId:job.contentId,template},controller.signal,()=>transition('REFINING'));attempts=generated.attempts;
+      const generated=validated?.script?{script:validated.script,attempts:[] as ModelAttempt[],warning:undefined,metadata:{source:'explicitly-approved-campaign',provenance:idea?.provenance}}:await generateScript(profile,{topic:job.topic,contentId:job.contentId,template},controller.signal,()=>transition('REFINING'));attempts=generated.attempts;
       if(idea?.requiredAssets.some(id=>!generated.script.scenes.some(scene=>scene.assetId===id)))throw new Error('Generated script omitted a required approved content asset');
       await atomicJson(path.join(artifactDir,'model-attempts.json'),attempts);await atomicJson(path.join(artifactDir,'script.json'),generated.script);await atomicJson(path.join(artifactDir,'model-metadata.json'),{...generated.metadata,warning:generated.warning??null,scriptHash:stableHash(generated.script)});
       transition('RENDERING',{warning:generated.warning??null});phase='render';
       let lastProgress=0,lastStage='';
-      const rendered=await renderVideo({jobId:job.id,script:generated.script,profile,artifactDir,signal:controller.signal,onProgress:(update)=>{assertOwned();if(update.stage==='validate'&&phase!=='validate'){transition('VALIDATING');phase='validate';}
-        const now=Date.now();if(update.stage!==lastStage||now-lastProgress>=500||update.progress===1){lastStage=update.stage??'render';lastProgress=now;this.store.event(job.id,'progress',{stage:lastStage,progress:Math.max(0,Math.min(1,update.progress))});}}});
+      const rendered=await withRenderLease((leaseSignal)=>renderVideo({jobId:job.id,script:generated.script,profile,artifactDir,signal:leaseSignal,onProgress:(update)=>{assertOwned();if(update.stage==='validate'&&phase!=='validate'){transition('VALIDATING');phase='validate';}
+        const now=Date.now();if(update.stage!==lastStage||now-lastProgress>=500||update.progress===1){lastStage=update.stage??'render';lastProgress=now;this.store.event(job.id,'progress',{stage:lastStage,progress:Math.max(0,Math.min(1,update.progress))});}}}),controller.signal);
       assertOwned();await atomicJson(path.join(artifactDir,'qa.json'),rendered.qa);
       await atomicJson(path.join(artifactDir,'metadata.json'),{jobId:job.id,attempt:job.attempts,scriptHash:stableHash(generated.script),profileHash:stableHash(profile),models:generated.metadata,attempts,render:rendered.renderMetadata,warning:generated.warning??null,approvalRequired:true,publishingImplemented:false,contentIdea:idea});
       if(!(rendered.qa&&typeof rendered.qa==='object'&&'passed' in rendered.qa&&rendered.qa.passed===true))throw new Error('Rendered video failed QA');
