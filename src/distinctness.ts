@@ -1,0 +1,26 @@
+export const distinctnessAuditVersion='structured-composition-v2';
+import {stableHash,type VideoScript} from './domain.js';
+
+export type ComparableConcept={projectId:string;contentAngle:string;category?:string;audience?:string;hook?:string;cta?:string;script?:VideoScript;sourceClaimIds?:string[];creativeApproach?:{narrative:string;visualTreatment:string;directionId:string;contentBaseId?:string};storyboard?:Array<{visual:string}>};
+export type DistinctnessComparison={id:string;classification:'EXACT_DUPLICATE'|'NEAR_DUPLICATE'|'SUPERFICIAL_REWRITE'|'DISTINCT'|'RELATED_TOPIC';blocking:boolean;reason:string;remedy:string;measures:{scriptOverlap:number;hookOverlap:number;topicOverlap:number;visualSequenceEqual:boolean;audienceEqual:boolean;evidenceOverlap:number;ctaEqual:boolean;narrativeEqual:boolean};evidenceLimit:string|null};
+const normal=(s:string)=>s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+const tokens=(s:string)=>new Set(normal(s).split(' ').filter(Boolean));
+export function wordOverlap(a:string,b:string){const x=tokens(a),y=tokens(b);if(!x.size||!y.size)return 0;let n=0;for(const word of x)if(y.has(word))n++;return 2*n/(x.size+y.size);}
+function core(c:ComparableConcept){return c.script?.scenes.slice(1,3).map(s=>({kind:s.kind,headline:normal(s.headline),body:normal(s.body),displayTexts:s.displayTexts?.map(normal)??[],assetId:s.assetId??null}))??[];}
+function sequence(c:ComparableConcept){return c.script?.scenes.slice(1,3).map(s=>({layout:s.layout??(s.assetId?'media':c.script?.template==='before-after'?s.kind:'note'),assetId:s.assetId??null}))??[];}
+export function compareConcept(a:ComparableConcept,b:ComparableConcept,id:string):DistinctnessComparison{
+ const scriptOverlap=wordOverlap(core(a).flatMap(s=>[s.headline,s.body,...s.displayTexts]).join(' '),core(b).flatMap(s=>[s.headline,s.body,...s.displayTexts]).join(' ')),hookOverlap=wordOverlap(a.hook??'',b.hook??''),topicOverlap=wordOverlap(a.contentAngle,b.contentAngle),visualSequenceEqual=JSON.stringify(sequence(a))===JSON.stringify(sequence(b)),audienceEqual=normal(a.audience??'')===normal(b.audience??'');
+ const leftRefs=new Set(a.sourceClaimIds??[]),rightRefs=new Set(b.sourceClaimIds??[]),evidenceOverlap=leftRefs.size+rightRefs.size?2*[...leftRefs].filter(id=>rightRefs.has(id)).length/(leftRefs.size+rightRefs.size):0;
+ const measures={scriptOverlap,hookOverlap,topicOverlap,visualSequenceEqual,audienceEqual,evidenceOverlap,ctaEqual:normal(a.cta??'')===normal(b.cta??''),narrativeEqual:normal(a.creativeApproach?.narrative??'')===normal(b.creativeApproach?.narrative??'')};let classification:DistinctnessComparison['classification']='DISTINCT',reason='Substantive script or narrative/visual sequence differs.',evidenceLimit=null;
+ if(!a.script||!b.script){classification='RELATED_TOPIC';reason=topicOverlap>=.8?'Related historical topic; complete script/visual structure is unavailable.':'Historical topic has insufficient structured evidence for a duplicate decision.';evidenceLimit='Topic keywords alone are not proof of duplicate composition.';}
+ else if(a.projectId===b.projectId){
+  const sameCore=stableHash(core(a))===stableHash(core(b)),sameHook=normal(a.hook??'')===normal(b.hook??'');
+  if(sameCore&&sameHook&&visualSequenceEqual&&audienceEqual){classification='EXACT_DUPLICATE';reason='Same substantive scene copy, hook, audience and rendered visual sequence; titles, angle labels, timing and hashtags do not create a new concept.';}
+  else if(scriptOverlap>=.9&&hookOverlap>=.9&&visualSequenceEqual&&audienceEqual){classification='NEAR_DUPLICATE';reason='At least 90% script and hook token overlap with the same audience and rendered visual sequence.';}
+  else if(scriptOverlap>=.75&&visualSequenceEqual&&audienceEqual){classification='SUPERFICIAL_REWRITE';reason='At least 75% substantive script token overlap with unchanged audience and visual sequence; wording or topic-label changes are superficial.';}
+  else if(sameCore||(scriptOverlap>=.75&&a.creativeApproach?.directionId&&a.creativeApproach.directionId===b.creativeApproach?.directionId&&a.creativeApproach.contentBaseId===b.creativeApproach.contentBaseId)){classification='SUPERFICIAL_REWRITE';reason='The substantive composition is the same, or the same content direction retains at least 75% script overlap; an opening or decorative treatment does not establish another story.';}
+ }
+ const blocking=['EXACT_DUPLICATE','NEAR_DUPLICATE','SUPERFICIAL_REWRITE'].includes(classification);
+ return {id,classification,blocking,reason,remedy:blocking?'Choose unused approved copy for a different viewer problem or feature, and change the opening and narrative/visual sequence. Preserve evidence, CTA and required assets.':'Shared feature words are allowed when the actual composition differs.',measures,evidenceLimit};
+}
+export function assessDistinctness(proposal:ComparableConcept,history:Array<{id:string;proposal:ComparableConcept}>){const comparisons=history.filter(h=>h.proposal.projectId===proposal.projectId).map(h=>compareConcept(proposal,h.proposal,h.id));return {method:distinctnessAuditVersion,objectiveQualityScore:false,comparisons,blockingIds:comparisons.filter(c=>c.blocking).map(c=>c.id),relatedIds:comparisons.filter(c=>c.classification==='RELATED_TOPIC'&&c.measures.topicOverlap>=.8).map(c=>c.id)};}

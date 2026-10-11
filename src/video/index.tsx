@@ -1,3 +1,4 @@
+import {CreativeSceneFrame} from './creative-scene.js';
 import React,{useEffect,useState} from 'react';
 import {AbsoluteFill,Composition,Img,OffthreadVideo,Sequence,continueRender,delayRender,cancelRender,interpolate,registerRoot,spring,staticFile,useCurrentFrame,useVideoConfig} from 'remotion';
 import type {ProjectProfile,VideoScript} from '../domain.js';
@@ -64,6 +65,7 @@ function ExplainerScene({scene,index,profile,script,logo}:Props&{scene:VideoScri
     <div style={{position:'absolute',left:90,right:90,bottom:250,fontFamily:profile.typography.mono,fontSize:31,lineHeight:1.5,color:profile.colors.muted}}>{content.disclaimer}</div>
   </AbsoluteFill>;
 }
+function CreativeScene({scene,profile,script,logo}:Props&{scene:VideoScript['scenes'][number]}){const frame=useCurrentFrame(),content=profile.approvedContent.find(c=>c.id===script.contentId)!;return <CreativeSceneFrame scene={scene} frame={frame} profile={profile} disclaimer={content.disclaimer??''} brand={<Brand profile={profile} logo={logo}/>}/>;}
 function AnnouncementScene({scene,index,profile,script,logo}:Props&{scene:VideoScript['scenes'][number];index:number}){
   const f=useCurrentFrame(),content=profile.approvedContent.find(c=>c.id===script.contentId)!;
   return <AbsoluteFill style={{background:profile.colors.background,color:profile.colors.ink,padding:'150px 90px 230px',fontFamily:profile.typography.body}}>
@@ -92,7 +94,7 @@ function Video(props:Props){
   return <AbsoluteFill style={{background:props.profile.colors.background}}>
     <Fonts/>
     {props.script.scenes.map((scene,index)=>{const from=offset;offset+=scene.seconds*30;return <Sequence key={index} from={from} durationInFrames={scene.seconds*30}>
-      {props.script.template==='announcement'&&props.profile.approvedContent.find(c=>c.id===props.script.contentId)?.source.includes('source recovery package')?<AnnouncementScene {...props} scene={scene} index={index}/>:props.script.template==='before-after'||(props.script.template==='announcement'&&props.profile.id==='whodunnit')?<WritingScene {...props} scene={scene} index={index}/>:['gameplay','feature-demo'].includes(props.script.template)?<VisualScene {...props} scene={scene} index={index}/>:<ExplainerScene {...props} scene={scene} index={index}/>}
+      {scene.layout==='media'?<VisualScene {...props} scene={scene} index={index}/>:scene.layout?<CreativeScene {...props} scene={scene}/>:props.script.template==='announcement'&&props.profile.approvedContent.find(c=>c.id===props.script.contentId)?.source.includes('source recovery package')?<AnnouncementScene {...props} scene={scene} index={index}/>:props.script.template==='before-after'||(props.script.template==='announcement'&&props.profile.id==='whodunnit')?<WritingScene {...props} scene={scene} index={index}/>:['gameplay','feature-demo'].includes(props.script.template)?<VisualScene {...props} scene={scene} index={index}/>:<ExplainerScene {...props} scene={scene} index={index}/>}
     </Sequence>;})}
     <div style={{position:'absolute',bottom:150,left:90,right:90,height:3,background:props.profile.colors.muted,opacity:0.65}}><div style={{height:3,width:(f/(duration-1)*100)+'%',background:props.profile.colors.accent}}/></div>
   </AbsoluteFill>;

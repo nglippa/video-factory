@@ -30,7 +30,7 @@ function offlineIdeaRun(service:IdeaService,id:string){const run=service.getRun(
 export async function main(argv=process.argv.slice(2)){
   const command=argv[0],options=args(argv.slice(1));
   if(command==='campaign'){
-    const action=argv[1]??'status';if(!['init','status','start','pause','resume','refresh-sources','retry-pilot','export'].includes(action))throw new Error('Usage: campaign init|status|start|pause|resume|refresh-sources|retry-pilot|export');
+    const action=argv[1]??'status';if(!['init','status','start','pause','resume','refresh-sources','retry-pilot','recover-creative','export'].includes(action))throw new Error('Usage: campaign init|status|start|pause|resume|refresh-sources|retry-pilot|recover-creative|export');
     const result=action==='init'?await apiRequest('POST','/api/campaigns',{id:campaignId}):await apiRequest(action==='status'?'GET':'POST','/api/campaigns/'+campaignId+(action==='status'?'':'/'+action),action==='status'?undefined:{});
     if(action==='status'){const {slots,...summary}=result;console.log(JSON.stringify(summary,null,2));}else console.log(JSON.stringify(result,null,2));return;
   }

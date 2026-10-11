@@ -22,6 +22,9 @@ export const projectProfileSchema = z.object({
 export const sceneSchema = z.object({
   kind: sceneKindSchema, headline: z.string().min(1).max(80), body: z.string().min(1).max(240),
   seconds: z.number().int().min(4).max(8), assetId: nonEmpty.optional(),
+  layout:z.enum(['headline','comparison','sequence','relationship','focus','media']).optional(),
+  displayTexts:z.array(nonEmpty.max(240)).min(1).max(3).optional(),
+  transition:z.enum(['cut','reveal','slide']).optional(), disclaimer:nonEmpty.max(240).optional(),
 }).strict();
 export const scriptSchema = z.object({
   version: z.literal(1), projectId: nonEmpty, topic: nonEmpty.max(300), template: templateSchema,
@@ -42,7 +45,9 @@ export function validateTrustedScript(value: unknown, profile: ProjectProfile): 
   const allowed = new Set([content.title, content.hook, content.body, content.before, content.after,
     content.cta, content.disclaimer, profile.cta, ...(content.lessons??[])].filter((text): text is string => Boolean(text)));
   for (const [index, scene] of script.scenes.entries()) {
-    if (!allowed.has(scene.headline) || !allowed.has(scene.body)) {
+    if(scene.layout==='media'&&!scene.assetId)throw new Error('Media layout requires an actual approved asset');
+    if(scene.assetId&&scene.layout&&scene.layout!=='media')throw new Error('Required scene asset must use the media renderer');
+    if (!allowed.has(scene.headline) || !allowed.has(scene.body) || scene.displayTexts?.some(text=>!allowed.has(text)) || (scene.disclaimer!==undefined&&scene.disclaimer!==content.disclaimer)) {
       throw new Error(`Scene ${index + 1} contains wording outside the approved content allowlist`);
     }
   }

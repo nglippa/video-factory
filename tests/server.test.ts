@@ -22,6 +22,8 @@ test('knowledge and idea routes enforce mutation guards and expose reviewed evid
     assert.equal((await request('/api/source-candidates/not-reviewed/approve','POST',{})).status,400);
     assert.equal((await request('/api/knowledge/register','POST',{id:'bad'})).status,400);
     assert.equal((await request('/api/ideas/'+randomUUID()+'/approve','POST',{})).status,404);
+    for(const route of ['/api/campaigns/2026-10-12-primary-projects/recover-creative','/api/campaigns/2026-10-12-primary-projects/proposals/test/redirect'])assert.equal((await request(route,'POST',{reason:'Synthetic test'},{origin:'https://evil.example'})).status,403);
+    assert.equal((await request('/api/campaigns/2026-10-12-primary-projects/recover-creative','POST',{unexpected:true})).status,400);
     const queued=await request('/api/idea-runs','POST',{projectId:'whodunnit',idempotencyKey:'api-idea-run',count:3});assert.equal(queued.status,202);assert.equal(queued.body.status,'QUEUED');
     const detail=await request('/api/idea-runs/'+queued.body.id);assert.equal(detail.status,200);assert.deepEqual(detail.body.candidates,[]);assert.equal(detail.body.provenance,null);
     assert.equal((await request('/api/idea-runs','POST',{projectId:'whodunnit',idempotencyKey:'api-idea-run',count:2})).status,400);
