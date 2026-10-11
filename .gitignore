@@ -8,3 +8,10 @@ data/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# Local human source approvals refer to immutable, private local data artifacts.
+/config/source-approvals.json
+
+# Generated Python script bytecode.
+__pycache__/
+*.pyc

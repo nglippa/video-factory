@@ -64,6 +64,7 @@ export function validateTrustedScript(value: unknown, profile: ProjectProfile): 
       if (scene.kind !== expected[index]) throw new Error('Explainer scenes must be hook, lesson, lesson, cta');
     });
   }
+  if(script.template==='gameplay'&&script.scenes.map(s=>s.kind).join(',')!=='hook,lesson,lesson,cta')throw new Error('Gameplay scenes must be hook, lesson, lesson, cta');
   if(script.scenes[3]?.kind!=='cta'||script.scenes[3]?.body!==profile.cta)throw new Error('Final scene must contain the exact project CTA');
   return script;
 }

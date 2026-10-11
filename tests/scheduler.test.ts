@@ -41,10 +41,10 @@ test('scheduler records invalid configuration and recovers after restart without
   let store=new JobStore(filename);
   try{
     await new BacklogService(store).seed();await writeFile(scheduleFile,'invalid JSON');await writeFile(ideaScheduleFile,'[]');
-    await new Scheduler(store,scheduleFile,60_000,ideaScheduleFile).tick(now);assert.match(store.production().error!,/JSON/);
+    await new Scheduler(store,scheduleFile,60_000,ideaScheduleFile,async()=>({allowed:true,reason:'Isolated fixture',config})).tick(now);assert.match(store.production().error!,/JSON/);
     store.close();store=new JobStore(filename);assert.match(store.production().error!,/JSON/);
     await writeFile(scheduleFile,JSON.stringify([{id:'recovery',projectId:'whodunnit',hour:9,minute:0,timezone:'America/Chicago',enabled:true,useBacklog:true}]));
-    const scheduler=new Scheduler(store,scheduleFile,60_000,ideaScheduleFile);const first=await scheduler.tick(now);assert.equal(first.length,1);assert.equal(store.production().error,null);
+    const scheduler=new Scheduler(store,scheduleFile,60_000,ideaScheduleFile,async()=>({allowed:true,reason:'Isolated fixture',config}));const first=await scheduler.tick(now);assert.equal(first.length,1);assert.equal(store.production().error,null);
     const second=await scheduler.tick(now);assert.equal(second[0]?.id,first[0]?.id);assert.equal(store.list().length,1);
     store.claim('crashed');store.db.prepare("UPDATE jobs SET lease_expires_at='2000-01-01T00:00:00Z'").run();store.close();store=new JobStore(filename);
     const recovered=store.claim('replacement');assert.equal(recovered?.id,first[0]?.id);assert.equal(recovered?.attempts,2);assert.equal(store.update(first[0]!.id,'FAILED',{owner:'crashed'}),false);

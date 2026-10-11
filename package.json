@@ -7,7 +7,7 @@
     "start": "node --import tsx src/server.ts",
     "cli": "node --import tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test tests/*.test.ts"
+    "test": "node scripts/run-tests.mjs"
   },
   "dependencies": {
     "@remotion/bundler": "4.0.534",

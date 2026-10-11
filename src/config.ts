@@ -2,6 +2,7 @@ import {readFile, readdir} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {projectProfileSchema, type ProjectProfile} from './domain.js';
+import {readSourceApprovals} from './source-recovery.js';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const CONFIG_DIR = path.resolve(process.env.CONFIG_DIR ?? path.join(ROOT_DIR, 'config'));
@@ -22,6 +23,11 @@ export async function loadProfiles(): Promise<ProjectProfile[]> {
   for (const profile of profiles) {
     if (ids.has(profile.id)) throw new Error(`Duplicate project profile id: ${profile.id}`);
     ids.add(profile.id);
+  }
+  for (const approval of await readSourceApprovals(CONFIG_DIR)) {
+    const index=profiles.findIndex(p=>p.id===approval.profile.id);
+    if(index<0)throw new Error('Approved source references unknown profile');
+    profiles[index]={...approval.profile,voice:[...approval.profile.voice,'Source approval note: '+approval.reason],restrictions:[...approval.profile.restrictions,...(approval.profile.id==='terra-steam-tycoon'&&/gameplay/i.test(approval.reason)&&/critical|required|necessary/i.test(approval.reason)?['HUMAN_REQUIRES_GAMEPLAY_FOOTAGE']:[])]};
   }
   return profiles;
 }

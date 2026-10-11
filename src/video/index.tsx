@@ -64,8 +64,19 @@ function ExplainerScene({scene,index,profile,script,logo}:Props&{scene:VideoScri
     <div style={{position:'absolute',left:90,right:90,bottom:250,fontFamily:profile.typography.mono,fontSize:31,lineHeight:1.5,color:profile.colors.muted}}>{content.disclaimer}</div>
   </AbsoluteFill>;
 }
+function AnnouncementScene({scene,index,profile,script,logo}:Props&{scene:VideoScript['scenes'][number];index:number}){
+  const f=useCurrentFrame(),content=profile.approvedContent.find(c=>c.id===script.contentId)!;
+  return <AbsoluteFill style={{background:profile.colors.background,color:profile.colors.ink,padding:'150px 90px 230px',fontFamily:profile.typography.body}}>
+    <Brand profile={profile} logo={logo}/>
+    <div style={{marginTop:110,fontFamily:profile.typography.mono,fontSize:28,color:profile.colors.accent}}>{profile.name.toUpperCase()} / {String(index+1).padStart(2,'0')}</div>
+    <div style={{marginTop:65}}><Words text={scene.headline} frame={f} size={84} family={profile.typography.display} color={profile.colors.ink}/></div>
+    <div style={{marginTop:65,borderTop:'1px solid '+profile.colors.accent,paddingTop:40,fontSize:42,lineHeight:1.5,opacity:interpolate(f,[20,40],[0,1],clamp)}}>{scene.body!==scene.headline?scene.body:content.body}</div>
+    <div style={{position:'absolute',left:90,right:90,bottom:250,fontFamily:profile.typography.mono,fontSize:29,lineHeight:1.5,color:profile.colors.muted}}>{content.disclaimer}</div>
+  </AbsoluteFill>;
+}
 function VisualScene({scene,index,profile,assets,logo,script}:Props&{scene:VideoScript['scenes'][number];index:number}){
   const f=useCurrentFrame();const source=scene.assetId?assets[scene.assetId]:undefined;
+  if((!source||index===0||index===3)&&profile.approvedContent.find(c=>c.id===script.contentId)?.source.includes('source recovery package'))return <AnnouncementScene {...{scene,index,profile,assets,logo,script}}/>;
   if(!source||index===0||index===3)return <ExplainerScene {...{scene,index,profile,assets,logo,script}}/>;
   const reveal=interpolate(f,[0,20],[0,1],clamp);
   return <AbsoluteFill style={{background:profile.colors.background,color:profile.colors.ink,fontFamily:profile.typography.body}}>
@@ -81,7 +92,7 @@ function Video(props:Props){
   return <AbsoluteFill style={{background:props.profile.colors.background}}>
     <Fonts/>
     {props.script.scenes.map((scene,index)=>{const from=offset;offset+=scene.seconds*30;return <Sequence key={index} from={from} durationInFrames={scene.seconds*30}>
-      {props.script.template==='before-after'||(props.script.template==='announcement'&&props.profile.id==='whodunnit')?<WritingScene {...props} scene={scene} index={index}/>:['gameplay','feature-demo'].includes(props.script.template)?<VisualScene {...props} scene={scene} index={index}/>:<ExplainerScene {...props} scene={scene} index={index}/>}
+      {props.script.template==='announcement'&&props.profile.approvedContent.find(c=>c.id===props.script.contentId)?.source.includes('source recovery package')?<AnnouncementScene {...props} scene={scene} index={index}/>:props.script.template==='before-after'||(props.script.template==='announcement'&&props.profile.id==='whodunnit')?<WritingScene {...props} scene={scene} index={index}/>:['gameplay','feature-demo'].includes(props.script.template)?<VisualScene {...props} scene={scene} index={index}/>:<ExplainerScene {...props} scene={scene} index={index}/>}
     </Sequence>;})}
     <div style={{position:'absolute',bottom:150,left:90,right:90,height:3,background:props.profile.colors.muted,opacity:0.65}}><div style={{height:3,width:(f/(duration-1)*100)+'%',background:props.profile.colors.accent}}/></div>
   </AbsoluteFill>;

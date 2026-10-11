@@ -2,10 +2,11 @@ import express,{type NextFunction,type Request,type Response} from 'express';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {existsSync} from 'node:fs';
-import {readFile,rename,writeFile} from 'node:fs/promises';
+import {readFile,readdir,realpath} from 'node:fs/promises';
 import {z} from 'zod';
 import {ARTIFACTS_DIR,CONFIG_DIR,DATA_DIR,DB_PATH,HOST,PORT,ROOT_DIR,loadProfile,loadProfiles} from './config.js';
 import {templateSchema} from './domain.js';
+import {SourceRecovery,sourceDecisionSchema} from './source-recovery.js';
 import {checkOllama,discoverBonsai} from './models.js';
 import {Pipeline} from './pipeline.js';
 import {JobStore} from './store.js';
@@ -15,20 +16,15 @@ import {IdeaService} from './ideas.js';
 import {CampaignService} from './campaigns.js';
 import {CommandCenter} from './command-center.js';
 import {campaignId} from './campaign-domain.js';
-import {KnowledgeRegistry,knowledgeRegistrySchema,knowledgeSourceSchema} from './knowledge.js';
+import {KnowledgeRegistry} from './knowledge.js';
 const artifactNames=new Set(['video.mp4','poster.jpg','script.json','metadata.json','qa.json']);
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const jobInput=z.object({projectId:z.string().min(1),topic:z.string().trim().min(1).max(300),contentId:z.string().min(1),template:templateSchema.optional(),idempotencyKey:z.string().min(1).max(200).optional()}).strict();
 const ideaRunInput=z.object({projectId:z.string().min(1),idempotencyKey:z.string().min(1).max(200),count:z.literal(3).default(3)}).strict();
 const ideaRejectInput=z.object({note:z.string().trim().min(1).max(500).optional()}).strict();
 const ideaRegenerateInput=z.object({idempotencyKey:z.string().min(1).max(200)}).strict();
-let registryWrite=Promise.resolve();
-function validateKnowledgeConfig(value:unknown){const config=knowledgeRegistrySchema.parse(value),unique=(values:string[],label:string)=>{if(new Set(values).size!==values.length)throw new Error(label+' must be unique');};unique(config.sources.map(source=>source.id),'Knowledge source IDs');unique(config.projects.map(project=>project.id),'Knowledge project IDs');unique(config.sources.flatMap(source=>source.selectors.map(selector=>selector.claimId)),'Knowledge claim IDs');const projectIds=new Set(config.projects.map(project=>project.id));if(config.sources.some(source=>source.selectors.some(selector=>!projectIds.has(selector.projectId))))throw new Error('Knowledge selector references unknown project');return config;}
-async function persistKnowledgeSource(registry:KnowledgeRegistry,value:unknown){
-  const source=knowledgeSourceSchema.parse(value),filename=path.join(CONFIG_DIR,'knowledge.json');let saved:typeof source|undefined;
-  const operation=registryWrite.catch(()=>{}).then(async()=>{const current=validateKnowledgeConfig(JSON.parse(await readFile(filename,'utf8'))),validated=await registry.registerSource(source),next=validateKnowledgeConfig({...current,sources:[...current.sources.filter(entry=>entry.id!==validated.id),validated]});const temp=filename+'.tmp-'+process.pid+'-'+Date.now();await writeFile(temp,JSON.stringify(next,null,2)+'\n',{mode:0o600,flag:'wx'});await rename(temp,filename);saved=validated;});registryWrite=operation;await operation;return saved!;
-}
 export function createApp(store:JobStore,pipeline?:Pipeline){
+  const sources=new SourceRecovery(ROOT_DIR,CONFIG_DIR,DATA_DIR);
   const app=express(),backlog=new BacklogService(store),ideas=pipeline?.ideas??new IdeaService(store),knowledge=new KnowledgeRegistry(),campaigns=pipeline?.campaigns??new CampaignService(store);app.disable('x-powered-by');const streams=new Set<()=>void>();app.locals.closeStreams=()=>{for(const close of streams)close();};
   const allowedHosts=new Set([HOST+':'+PORT,'localhost:'+PORT]);
   app.use((req,res,next)=>{
@@ -50,12 +46,18 @@ export function createApp(store:JobStore,pipeline?:Pipeline){
   app.get('/api/campaigns/:id/exports/:filename',(req,res)=>{const id=z.literal(campaignId).parse(param(req.params.id)),filename=z.enum(['SUMMARY.md','proposals.json','blockers.json','whodunnit.md','gigwise.md','terra-steam-tycoon.md','angband.md','find-my-needs.md']).parse(param(req.params.filename)),directory=campaigns.state(id)?.lastExport;if(!directory)return res.status(404).end();const root=path.join(DATA_DIR,'campaigns',id,'exports'),relative=path.relative(root,directory);if(!relative||relative.startsWith('..')||path.isAbsolute(relative))return res.status(404).end();res.download(path.join(directory,filename),filename);});
   app.post('/api/campaigns',mutationGuard,async(req,res)=>{z.object({id:z.literal(campaignId)}).strict().parse(req.body);campaigns.initialize();await campaigns.refreshSources();await campaigns.export();res.status(201).json(campaigns.overview());});
   app.post('/api/campaigns/:id/:action',mutationGuard,async(req,res)=>{const id=z.literal(campaignId).parse(param(req.params.id)),action=z.enum(['start','pause','resume','refresh-sources','retry-pilot','export']).parse(param(req.params.action));z.object({}).strict().parse(req.body);if(action==='export')return res.json({directory:await campaigns.export(id)});res.json(await campaigns.control(action,id));});
-  app.post('/api/campaigns/:campaignId/proposals/:id/:action',mutationGuard,async(req,res)=>{z.literal(campaignId).parse(param(req.params.campaignId));const id=z.string().regex(/^[a-z0-9-]+$/).parse(param(req.params.id)),action=z.enum(['approve','reject','revise']).parse(param(req.params.action)),body=z.object({reason:z.string().trim().min(1).max(2000).optional()}).strict().parse(req.body);if(campaigns.slot(id)?.campaignId!==campaignId)return res.status(404).json({error:'Proposal not found'});res.json(await campaigns.review(id,action,body.reason));});
+  app.post('/api/campaigns/:campaignId/proposals/:id/:action',mutationGuard,async(req,res)=>{z.literal(campaignId).parse(param(req.params.campaignId));const id=z.string().regex(/^[a-z0-9-]+$/).parse(param(req.params.id)),action=z.enum(['approve','reject','revise']).parse(param(req.params.action)),body=z.object({reason:z.string().trim().min(1).max(2000).optional(),contentBaseId:z.string().regex(/^[a-z0-9-]+$/).optional(),gameplayAssetIds:z.tuple([z.string().regex(/^[a-z0-9-]+$/),z.string().regex(/^[a-z0-9-]+$/)]).optional()}).strict().refine(v=>Boolean(v.contentBaseId)===Boolean(v.gameplayAssetIds),'Content and gameplay asset selection must be provided together').parse(req.body);if(campaigns.slot(id)?.campaignId!==campaignId)return res.status(404).json({error:'Proposal not found'});res.json(await campaigns.review(id,action,body.reason,body.contentBaseId&&body.gameplayAssetIds?{contentBaseId:body.contentBaseId,gameplayAssetIds:body.gameplayAssetIds}:undefined));});
   app.get('/api/projects',async(_req,res)=>res.json(await loadProfiles()));
+  const recoveryReports=path.join(DATA_DIR,'campaigns',campaignId,'source-recovery');
+  async function latestRecoveryReport(){try{const entries=(await readdir(recoveryReports,{withFileTypes:true})).filter(e=>e.isDirectory()&&/^\d{4}-\d{2}-\d{2}T[\d-Z]+$/.test(e.name)).map(e=>e.name).sort().reverse();for(const name of entries){const directory=path.join(recoveryReports,name);if(await realpath(directory)!==directory)continue;if(existsSync(path.join(directory,'SUMMARY.md'))&&existsSync(path.join(directory,'throughput.json')))return directory;}return null;}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;}}
+  app.get('/api/source-recovery/report',async(_req,res)=>{const directory=await latestRecoveryReport();res.json({available:Boolean(directory),directory});});
+  app.get('/api/source-recovery/report/:filename',async(req,res)=>{const filename=z.enum(['SUMMARY.md','throughput.json']).parse(param(req.params.filename)),directory=await latestRecoveryReport();if(!directory)return res.status(404).end();const file=path.join(directory,filename);if(await realpath(file)!==file)return res.status(404).end();res.download(file,filename);});
+  app.get('/api/source-candidates',async(_req,res)=>res.json(await sources.list()));
+  app.post('/api/source-candidates/:id/:action',mutationGuard,async(req,res)=>{const action=z.enum(['approve','reject']).parse(param(req.params.action)),result=await sources.decide(param(req.params.id),action,sourceDecisionSchema.parse(req.body));let refreshError:string|null=null;if(action==='approve'){try{await campaigns.refreshSources([result.candidate.projectId]);await campaigns.revalidateProductionRequirements([result.candidate.projectId]);await campaigns.export();}catch(error){refreshError=error instanceof Error?error.message:String(error);}}res.json({...result,refreshError});});
   app.get('/api/knowledge',async(_req,res)=>res.json(await knowledge.refresh()));
   app.get('/api/knowledge/sources/:id',async(req,res)=>res.json(await knowledge.inspectSource(param(req.params.id))));
   app.post('/api/knowledge/refresh',mutationGuard,async(_req,res)=>res.json(await knowledge.refresh()));
-  app.post('/api/knowledge/register',mutationGuard,async(req,res)=>res.status(201).json(await persistKnowledgeSource(knowledge,knowledgeSourceSchema.parse(req.body))));
+  app.post('/api/knowledge/register',mutationGuard,(_req,res)=>res.status(400).json({error:'New knowledge requires explicit source candidate review. Use Source approval in the existing dashboard.'}));
   app.get('/api/ideas',(req,res)=>res.json(ideas.list(typeof req.query.projectId==='string'?req.query.projectId:undefined)));
   app.get('/api/idea-runs',(_req,res)=>res.json(ideas.runs()));
   app.get('/api/idea-runs/:id',async(req,res)=>{const id=z.uuid().parse(param(req.params.id)),run=ideas.getRun(id);if(!run)return res.status(404).json({error:'Not found'});const events=(store.db.prepare('SELECT id,type,data,created_at FROM idea_events WHERE run_id=? ORDER BY id').all(id) as Array<{id:number;type:string;data:string;created_at:string}>).map(event=>({...event,data:JSON.parse(event.data),createdAt:event.created_at}));let provenance:unknown=null;try{provenance=JSON.parse(await readFile(path.join(DATA_DIR,'idea-runs',id+'.json'),'utf8'));}catch{/* queued, failed, or legacy run */}res.json({...run,candidates:ideas.list(run.projectId).filter(idea=>idea.runId===id),events,provenance});});

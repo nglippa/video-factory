@@ -17,6 +17,9 @@ test('knowledge and idea routes enforce mutation guards and expose reviewed evid
   try{
     const knowledge=await request('/api/knowledge');assert.equal(knowledge.status,200);assert.ok(knowledge.body.some((project:any)=>project.projectId==='whodunnit'&&project.claims.some((claim:any)=>claim.sourceId&&claim.locator&&claim.sha256&&claim.text)));
     assert.equal((await request('/api/knowledge/register','POST',{}, {origin:'https://evil.example'})).status,403);
+    assert.equal((await request('/api/source-candidates')).status,200);
+    assert.equal((await request('/api/source-candidates/not-reviewed/approve','POST',{}, {origin:'https://evil.example'})).status,403);
+    assert.equal((await request('/api/source-candidates/not-reviewed/approve','POST',{})).status,400);
     assert.equal((await request('/api/knowledge/register','POST',{id:'bad'})).status,400);
     assert.equal((await request('/api/ideas/'+randomUUID()+'/approve','POST',{})).status,404);
     const queued=await request('/api/idea-runs','POST',{projectId:'whodunnit',idempotencyKey:'api-idea-run',count:3});assert.equal(queued.status,202);assert.equal(queued.body.status,'QUEUED');
