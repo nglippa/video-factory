@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Local Video Factory</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header class="masthead"><a class="identity" href="/"><svg viewBox="0 0 28 28" aria-hidden="true"><path d="M4 4h20v20H4zM10 4v20M4 10h6M4 18h6M18 4v20M18 10h6M18 18h6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg><span>Video Factory<span class="identity-note">LOCAL PRODUCTION STUDIO</span></span></a><div class="connection"><span id="connection-dot" class="dot"></span><span id="connection">Connecting to studio</span></div><span class="format">1080 × 1920 / 30 FPS</span></header>
+<main>
+<div class="heading"><div><p class="eyebrow">BRIEF → MOTION → REVIEW</p><h1>Good work deserves<br><em>a proper introduction.</em></h1></div><p class="intro">Turn approved project content into<br>finished vertical films. Made on your Mac.<br>Every export waits for your review.</p></div>
+<div class="workspace">
+<section class="production" aria-labelledby="brief-heading">
+<div class="section-title"><h2 id="brief-heading">01 <span>Production brief</span></h2><span id="project-count" class="quiet">Loading profiles</span></div>
+<form id="brief-form">
+<div class="form-pair"><div><label for="project">Project</label><select id="project" required aria-describedby="profile-notice"></select></div><div><label for="template">Composition</label><select id="template" required></select></div></div>
+<label for="topic">Topic / creative direction</label><input id="topic" maxlength="300" required placeholder="What should this film focus on?">
+<label for="content">Approved content</label><select id="content" required></select>
+<div id="profile-notice" class="profile-notice"></div>
+<details id="approved-details"><summary>View the approved source text</summary><div id="approved-copy"></div></details>
+<div class="form-bottom"><p id="brief-hint">Local script generation. Human approval before use.</p><button id="generate" class="primary" type="submit">Generate film <span aria-hidden="true">↗</span></button></div>
+</form>
+<div id="error" role="alert" hidden></div>
+<div class="models" aria-label="Local model status"><div><span class="eyebrow">SCRIPT / QWEN</span><strong id="qwen-state">Checking connection</strong><span id="qwen-detail" class="quiet"></span></div><div><span class="eyebrow">EDITORIAL / BONSAI</span><strong id="bonsai-state">Checking connection</strong><span id="bonsai-detail" class="quiet"></span></div></div>
+<section class="current" aria-labelledby="current-heading"><div class="section-title"><h2 id="current-heading">02 <span>On the timeline</span></h2><span id="current-state" class="quiet">Idle</span></div><p id="current-topic">Your next film starts with a brief.</p><div class="progress-track" role="progressbar" aria-label="Render progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress"></div></div><div class="progress-caption"><span id="progress-stage">One job at a time · models unload before rendering</span><span id="progress-number">—</span></div></section>
+<section class="queue-section" aria-labelledby="queue-heading"><div class="section-title"><h2 id="queue-heading">03 <span>Production queue</span></h2><span id="queue-count" class="quiet">0 jobs</span></div><div class="table-wrap"><table><thead><tr><th>Project / topic</th><th>State</th><th>Attempt</th></tr></thead><tbody id="queue"></tbody></table></div><p id="queue-empty" class="empty">No productions yet. Create your first film above.</p></section>
+</section>
+<aside class="review" aria-labelledby="review-heading"><div class="section-title"><h2 id="review-heading">04 <span>Review room</span></h2><span id="review-state" class="quiet">Awaiting a film</span></div>
+<div id="preview-empty" class="preview-empty"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M12 6h24v36H12zM20 18l12 6-12 6z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg><span>Your finished film<br>will appear here.</span><small>VERTICAL / 9:16</small></div>
+<video id="preview" controls playsinline preload="metadata" hidden aria-label="Generated video preview"></video>
+<div id="review-info" hidden><p id="review-topic"></p><p id="review-warning" class="warning"></p><p id="review-error" class="warning"></p><div class="review-actions"><button id="approve" class="primary" type="button">Approve for use</button><button id="reject" type="button">Reject</button><button id="retry" type="button">Retry job</button><button id="cancel" type="button">Cancel job</button></div><p id="review-note" class="quiet">Approval records your review locally.</p><div class="artifact-links" id="artifact-links"></div><div id="qa" aria-live="polite"></div></div>
+</aside>
+</div>
+<footer><span>PRIVATE BY DESIGN · FILES STAY LOCAL</span><span id="last-event">Waiting for backend events</span><span>APPLE SILICON / 24 GB</span></footer>
+</main>
+</body></html>

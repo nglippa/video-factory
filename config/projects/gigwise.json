@@ -1,0 +1,63 @@
+{
+  "enabled": true,
+  "colors": {
+    "background": "#050d0d",
+    "ink": "#f1fbf7",
+    "accent": "#8dfbe2",
+    "muted": "#9fbfb5"
+  },
+  "typography": {
+    "display": "Instrument Sans",
+    "body": "Instrument Sans",
+    "mono": "IBM Plex Mono"
+  },
+  "voice": [
+    "Clear, practical recordkeeping education.",
+    "No invented tax rules, deduction eligibility, rates, or savings."
+  ],
+  "logo": {
+    "type": "image",
+    "value": "assets/gigwise/logo.png"
+  },
+  "templates": [
+    "explainer",
+    "announcement"
+  ],
+  "restrictions": [
+    "No tax advice or financial promises.",
+    "Synthetic recordkeeping illustration only.",
+    "Only product capabilities documented in the existing app metadata."
+  ],
+  "cta": "Keep your records with GigWise.",
+  "assetDirectories": [
+    "public/assets/gigwise"
+  ],
+  "output": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "approvedContent": [
+    {
+      "id": "recordkeeping",
+      "topic": "Organize your business records",
+      "title": "Make recordkeeping a habit.",
+      "hook": "A little structure goes a long way.",
+      "body": "Track mileage, receipts, and business expenses.",
+      "cta": "Keep your records with GigWise.",
+      "disclaimer": "Recordkeeping education. Not tax advice.",
+      "source": "Curated from GigWise app/layout.tsx product metadata. No rates, eligibility rules, or savings claims. Original illustrative bookkeeping copy. Original general organizational guidance: retain a date, a business purpose, and the matching receipt. This does not state tax eligibility requirements.",
+      "lessons": [
+        "Record the date and business purpose.",
+        "Keep the receipt with the expense."
+      ]
+    }
+  ],
+  "brandSources": [
+    "../GigWise/app/globals.css",
+    "../GigWise/app/layout.tsx",
+    "../GigWise/public/brand/gigwise-logo-transparent.png"
+  ],
+  "id": "gigwise",
+  "name": "GigWise"
+}

@@ -1,0 +1,63 @@
+{
+  "enabled": true,
+  "colors": {
+    "background": "#f4f1ea",
+    "ink": "#1a1916",
+    "accent": "#8a2d1c",
+    "muted": "#56524a"
+  },
+  "typography": {
+    "display": "Newsreader",
+    "body": "Instrument Sans",
+    "mono": "IBM Plex Mono"
+  },
+  "voice": [
+    "Direct, thoughtful, precise.",
+    "Your thoughts. Your voice.",
+    "Avoid claims about evading AI detection."
+  ],
+  "logo": {
+    "type": "wordmark",
+    "value": "Whodunnit"
+  },
+  "templates": [
+    "before-after",
+    "announcement"
+  ],
+  "restrictions": [
+    "Use the exact approved example pair.",
+    "No detector scores, invented outcomes, or guarantees.",
+    "The rewrite is a synthetic illustration, not recorded application output."
+  ],
+  "cta": "Find your voice with Whodunnit.",
+  "assetDirectories": [
+    "public/assets/whodunnit"
+  ],
+  "output": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "approvedContent": [
+    {
+      "id": "clear-writing",
+      "topic": "Clearer writing, same meaning",
+      "title": "Your thoughts. Your voice.",
+      "hook": "Make room for your voice.",
+      "body": "Less clutter. The same idea.",
+      "before": "At this point in time, we are making plans to begin the project.",
+      "after": "We’re planning to start the project.",
+      "cta": "Find your voice with Whodunnit.",
+      "disclaimer": "Example rewrite",
+      "source": "Synthetic pair explicitly approved by the user on 2026-10-10. Branding and product identity from Whodunnit README and design tokens."
+    }
+  ],
+  "brandSources": [
+    "../Whodunnit/src/app/globals.css",
+    "../Whodunnit/src/app/layout.tsx",
+    "../Whodunnit/src/components/brand/Mark.tsx",
+    "../Whodunnit/README.md"
+  ],
+  "id": "whodunnit",
+  "name": "Whodunnit"
+}

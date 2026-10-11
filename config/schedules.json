@@ -1,0 +1,24 @@
+[
+  {
+    "id": "whodunnit-daily",
+    "projectId": "whodunnit",
+    "topic": "Clearer writing, same meaning",
+    "contentId": "clear-writing",
+    "template": "before-after",
+    "hour": 9,
+    "minute": 0,
+    "timezone": "America/Chicago",
+    "enabled": false
+  },
+  {
+    "id": "gigwise-daily",
+    "projectId": "gigwise",
+    "topic": "Organize your business records",
+    "contentId": "recordkeeping",
+    "template": "explainer",
+    "hour": 9,
+    "minute": 10,
+    "timezone": "America/Chicago",
+    "enabled": false
+  }
+]

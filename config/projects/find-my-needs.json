@@ -1,0 +1,43 @@
+{
+  "enabled": false,
+  "colors": {
+    "background": "#161715",
+    "ink": "#f4f1ea",
+    "accent": "#bca383",
+    "muted": "#888a83"
+  },
+  "typography": {
+    "display": "Newsreader",
+    "body": "Instrument Sans",
+    "mono": "IBM Plex Mono"
+  },
+  "voice": [
+    "Use only approved content."
+  ],
+  "logo": {
+    "type": "wordmark",
+    "value": "Find My Needs"
+  },
+  "templates": [
+    "feature-demo",
+    "explainer",
+    "announcement"
+  ],
+  "restrictions": [
+    "Awaiting verified brand and approved synthetic demonstration assets.",
+    "Synthetic healthcare examples only. No patient information or clinical claims."
+  ],
+  "cta": "Brand approval required.",
+  "assetDirectories": [
+    "public/assets/find-my-needs"
+  ],
+  "output": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "approvedContent": [],
+  "brandSources": [],
+  "id": "find-my-needs",
+  "name": "Find My Needs"
+}
